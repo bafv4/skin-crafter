@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm add:*)",
+      "Bash(~/.local/share/pnpm/pnpm add:*)",
+      "Bash(~/.local/share/pnpm/pnpm add -D @types/three)",
+      "Bash(export PATH=\"/home/bafv4/.nvm/versions/node/v25.2.1/bin:$PATH:/usr/bin\":*)",
+      "Bash(pnpm run build:*)"
+    ]
+  }
+}
