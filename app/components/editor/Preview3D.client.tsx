@@ -1,36 +1,70 @@
-import { useRef, useEffect, useMemo, type RefObject } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
+import { useRef, useEffect, useMemo } from 'react';
+import { Canvas, useFrame, invalidate } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { useEditorStore } from '../../stores/editorStore';
-import { SKIN_WIDTH, SKIN_HEIGHT, type ModelType } from '../../types/editor';
+import { SKIN_WIDTH, SKIN_HEIGHT, type ModelType, type Layer, type LayerGroup } from '../../types/editor';
 
-// Create texture from pixel data
-// Only updates when previewVersion changes (not on every pixel change)
-function useSkinTexture() {
-  // Subscribe to previewVersion to control when texture updates
-  const previewVersion = useEditorStore((state) => state.previewVersion);
-  const textureRef = useRef<THREE.DataTexture | null>(null);
-  const initializedRef = useRef(false);
+// Build a set of hidden layer IDs based on layer and group visibility
+function getHiddenLayerIds(layers: Layer[], layerGroups: LayerGroup[]): Set<string> {
+  const hiddenLayerIds = new Set<string>();
+  const hiddenGroupIds = new Set(
+    layerGroups.filter((g) => !g.visible).map((g) => g.id)
+  );
 
-  // Create texture only once
-  const texture = useMemo(() => {
-    const pixels = useEditorStore.getState().pixels;
-    const data = new Uint8Array(SKIN_WIDTH * SKIN_HEIGHT * 4);
+  for (const layer of layers) {
+    if (!layer.visible || (layer.groupId && hiddenGroupIds.has(layer.groupId))) {
+      hiddenLayerIds.add(layer.id);
+    }
+  }
 
-    for (let y = 0; y < SKIN_HEIGHT; y++) {
-      for (let x = 0; x < SKIN_WIDTH; x++) {
-        // Flip Y for texture coordinates
-        const srcY = SKIN_HEIGHT - 1 - y;
-        const pixel = pixels[srcY][x];
-        const i = (y * SKIN_WIDTH + x) * 4;
+  return hiddenLayerIds;
+}
 
+// Helper to build texture data from pixels
+function buildTextureData(
+  pixels: ReturnType<typeof useEditorStore.getState>['pixels'],
+  layers: ReturnType<typeof useEditorStore.getState>['layers'],
+  layerGroups: ReturnType<typeof useEditorStore.getState>['layerGroups']
+): Uint8Array {
+  const hiddenLayerIds = getHiddenLayerIds(layers, layerGroups);
+  const data = new Uint8Array(SKIN_WIDTH * SKIN_HEIGHT * 4);
+
+  for (let y = 0; y < SKIN_HEIGHT; y++) {
+    for (let x = 0; x < SKIN_WIDTH; x++) {
+      // Flip Y for texture coordinates
+      const srcY = SKIN_HEIGHT - 1 - y;
+      const pixel = pixels[srcY][x];
+      const i = (y * SKIN_WIDTH + x) * 4;
+
+      // Skip pixels from hidden layers
+      if (pixel.layerId && hiddenLayerIds.has(pixel.layerId)) {
+        data[i] = 0;
+        data[i + 1] = 0;
+        data[i + 2] = 0;
+        data[i + 3] = 0;
+      } else {
         data[i] = pixel.color.r;
         data[i + 1] = pixel.color.g;
         data[i + 2] = pixel.color.b;
         data[i + 3] = pixel.color.a;
       }
     }
+  }
+
+  return data;
+}
+
+// Create texture from pixel data
+// Recreates texture when previewVersion changes
+function useSkinTexture() {
+  // Subscribe to previewVersion to control when texture updates
+  const previewVersion = useEditorStore((state) => state.previewVersion);
+
+  // Create new texture whenever previewVersion changes
+  const texture = useMemo(() => {
+    const state = useEditorStore.getState();
+    const data = buildTextureData(state.pixels, state.layers, state.layerGroups);
 
     const tex = new THREE.DataTexture(
       data,
@@ -40,35 +74,15 @@ function useSkinTexture() {
     );
     tex.magFilter = THREE.NearestFilter;
     tex.minFilter = THREE.NearestFilter;
+    // Clamp to edge to prevent texture bleeding at seams
+    tex.wrapS = THREE.ClampToEdgeWrapping;
+    tex.wrapT = THREE.ClampToEdgeWrapping;
+    // Use NoColorSpace to prevent gamma correction - display colors exactly as in 2D canvas
+    // The pixel data is already in sRGB, and we want to display it without any transformation
+    tex.colorSpace = THREE.NoColorSpace;
     tex.needsUpdate = true;
 
-    textureRef.current = tex;
-    initializedRef.current = true;
     return tex;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Only create once, update via effect
-
-  // Update texture when previewVersion changes
-  useEffect(() => {
-    if (textureRef.current && initializedRef.current) {
-      const pixels = useEditorStore.getState().pixels;
-      const data = textureRef.current.image.data as Uint8Array;
-
-      for (let y = 0; y < SKIN_HEIGHT; y++) {
-        for (let x = 0; x < SKIN_WIDTH; x++) {
-          const srcY = SKIN_HEIGHT - 1 - y;
-          const pixel = pixels[srcY][x];
-          const i = (y * SKIN_WIDTH + x) * 4;
-
-          data[i] = pixel.color.r;
-          data[i + 1] = pixel.color.g;
-          data[i + 2] = pixel.color.b;
-          data[i + 3] = pixel.color.a;
-        }
-      }
-
-      textureRef.current.needsUpdate = true;
-    }
   }, [previewVersion]);
 
   return texture;
@@ -104,6 +118,7 @@ function createSkinGeometry(
 
   // Helper to convert pixel coords to UV coords
   // Returns 4 vertices: bottom-left, bottom-right, top-right, top-left (CCW from bottom-left)
+  // ClampToEdgeWrapping prevents texture bleeding, so we use exact pixel boundaries
   const toFaceUVs = (x: number, y: number, w: number, h: number): [number, number][] => {
     const u1 = x / SKIN_WIDTH;
     const u2 = (x + w) / SKIN_WIDTH;
@@ -224,9 +239,12 @@ function MinecraftCharacter({ modelType, autoRotate }: { modelType: ModelType; a
   const groupRef = useRef<THREE.Group>(null);
 
   // Rotate slowly when autoRotate is enabled
+  // When not rotating, useFrame still runs but does nothing (frameloop=demand handles this)
   useFrame((_, delta) => {
     if (groupRef.current && autoRotate) {
       groupRef.current.rotation.y += delta * 0.3;
+      // Request next frame for continuous animation
+      invalidate();
     }
   });
 
@@ -430,12 +448,15 @@ function Scene({ autoRotate, zoom, onZoomChange, resetKey }: {
   }, [zoom]);
 
   // Handle wheel zoom and sync with parent
+  // Also trigger re-render on controls change for on-demand frameloop
   useEffect(() => {
-    if (!controlsRef.current || !onZoomChange) return;
+    if (!controlsRef.current) return;
 
     const controls = controlsRef.current;
     const handleChange = () => {
-      if (controls.object) {
+      // Request re-render when user interacts with controls
+      invalidate();
+      if (controls.object && onZoomChange) {
         const distance = controls.object.position.length();
         // Convert distance to zoom (inverse relationship)
         const newZoom = Math.max(0.5, Math.min(2, 4 / distance));
@@ -468,6 +489,25 @@ function Scene({ autoRotate, zoom, onZoomChange, resetKey }: {
   );
 }
 
+// Component to trigger initial render and handle texture updates
+function RenderController({ autoRotate }: { autoRotate: boolean }) {
+  const previewVersion = useEditorStore((state) => state.previewVersion);
+
+  // Trigger re-render when texture updates
+  useEffect(() => {
+    invalidate();
+  }, [previewVersion]);
+
+  // Start animation loop when autoRotate is enabled
+  useEffect(() => {
+    if (autoRotate) {
+      invalidate();
+    }
+  }, [autoRotate]);
+
+  return null;
+}
+
 export function Preview3DCanvas({
   autoRotate = true,
   zoom = 1,
@@ -480,7 +520,12 @@ export function Preview3DCanvas({
   resetKey?: number;
 }) {
   return (
-    <Canvas camera={{ position: [3 / zoom, 2 / zoom, 3 / zoom], fov: 45 }} key={resetKey}>
+    <Canvas
+      camera={{ position: [3 / zoom, 2 / zoom, 3 / zoom], fov: 45 }}
+      key={resetKey}
+      frameloop="demand"
+    >
+      <RenderController autoRotate={autoRotate} />
       <Scene autoRotate={autoRotate} zoom={zoom} onZoomChange={onZoomChange} resetKey={resetKey} />
     </Canvas>
   );

@@ -1,6 +1,6 @@
 import {
   type RGBA,
-  type Group,
+  type Layer,
   type PixelData,
   type SkinRegion,
   SKIN_WIDTH,
@@ -31,7 +31,7 @@ function colorDistance(c1: RGBA, c2: RGBA): number {
 }
 
 // Check if two colors are similar
-function areColorsSimilar(c1: RGBA, c2: RGBA, threshold = COLOR_SIMILARITY_THRESHOLD): boolean {
+function areColorsSimilar(c1: RGBA, c2: RGBA, threshold: number = COLOR_SIMILARITY_THRESHOLD): boolean {
   return colorDistance(c1, c2) <= threshold;
 }
 
@@ -393,12 +393,12 @@ function calculateNoiseFromThreshold(threshold: number): { brightness: number; h
   };
 }
 
-// Generate groups from image data
-export function generateGroupsFromImageData(
+// Generate layers from image data
+export function generateLayersFromImageData(
   imageData: ImageData,
-  colorThreshold = COLOR_SIMILARITY_THRESHOLD,
+  colorThreshold: number = COLOR_SIMILARITY_THRESHOLD,
   applyNoiseFromThreshold = true
-): { pixels: PixelData[][]; groups: Group[] } {
+): { pixels: PixelData[][]; layers: Layer[] } {
   const width = Math.min(imageData.width, SKIN_WIDTH);
   const height = Math.min(imageData.height, SKIN_HEIGHT);
 
@@ -473,6 +473,38 @@ export function generateGroupsFromImageData(
           }
         }
       }
+
+      // Check bottom-right neighbor (diagonal)
+      if (x + 1 < SKIN_WIDTH && y + 1 < SKIN_HEIGHT) {
+        const bottomRightColor = colors[y + 1][x + 1];
+        if (bottomRightColor) {
+          const bottomRightPart = getSkinPart(x + 1, y + 1);
+          const bottomRightBodyPart = bottomRightPart ? getBodyPartName(bottomRightPart, true) : null;
+
+          if (
+            currentBodyPart === bottomRightBodyPart &&
+            areColorsSimilar(color, bottomRightColor, colorThreshold)
+          ) {
+            uf.union(toIndex(x, y), toIndex(x + 1, y + 1));
+          }
+        }
+      }
+
+      // Check bottom-left neighbor (diagonal)
+      if (x - 1 >= 0 && y + 1 < SKIN_HEIGHT) {
+        const bottomLeftColor = colors[y + 1][x - 1];
+        if (bottomLeftColor) {
+          const bottomLeftPart = getSkinPart(x - 1, y + 1);
+          const bottomLeftBodyPart = bottomLeftPart ? getBodyPartName(bottomLeftPart, true) : null;
+
+          if (
+            currentBodyPart === bottomLeftBodyPart &&
+            areColorsSimilar(color, bottomLeftColor, colorThreshold)
+          ) {
+            uf.union(toIndex(x, y), toIndex(x - 1, y + 1));
+          }
+        }
+      }
     }
   }
 
@@ -510,13 +542,13 @@ export function generateGroupsFromImageData(
     ? calculateNoiseFromThreshold(colorThreshold)
     : { brightness: 0, hue: 0 };
 
-  // Create groups from components
-  const groups: Group[] = [];
-  const pixelGroupMap = new Map<string, string>(); // "x,y" -> groupId
+  // Create layers from components
+  const layers: Layer[] = [];
+  const pixelLayerMap = new Map<string, string>(); // "x,y" -> layerId
 
-  let groupIndex = 1;
+  let layerIndex = 1;
   for (const [, pixels] of componentPixels) {
-    // Calculate average color for the group
+    // Calculate average color for the layer
     let totalR = 0, totalG = 0, totalB = 0;
     for (const p of pixels) {
       totalR += p.color.r;
@@ -530,27 +562,31 @@ export function generateGroupsFromImageData(
       a: 255,
     };
 
-    // Get part name for group naming (include layer info for Layer 2)
+    // Get part name for layer naming (include skin layer info for Layer 2)
     const firstPixel = pixels[0];
     const part = getSkinPart(firstPixel.x, firstPixel.y);
     const partName = part ? getBodyPartName(part) : 'unknown';
-    const layerSuffix = part && part.layer === 2 ? '-overlay' : '';
+    const overlaySuffix = part && part.layer === 2 ? '-overlay' : '';
 
-    const groupId = generateId();
-    const group: Group = {
-      id: groupId,
-      name: `${partName}${layerSuffix}-${groupIndex}`,
+    const layerId = generateId();
+    const layer: Layer = {
+      id: layerId,
+      name: `${partName}${overlaySuffix}-${layerIndex}`,
       baseColor: avgColor,
       noiseSettings: { ...noiseSettings },
+      groupId: null,
+      order: layerIndex - 1,
+      layerType: 'singleColor',
+      visible: true,
     };
-    groups.push(group);
+    layers.push(layer);
 
-    // Map pixels to this group
+    // Map pixels to this layer
     for (const p of pixels) {
-      pixelGroupMap.set(`${p.x},${p.y}`, groupId);
+      pixelLayerMap.set(`${p.x},${p.y}`, layerId);
     }
 
-    groupIndex++;
+    layerIndex++;
   }
 
   // Create final pixel array
@@ -559,143 +595,145 @@ export function generateGroupsFromImageData(
     resultPixels[y] = [];
     for (let x = 0; x < SKIN_WIDTH; x++) {
       const color = colors[y][x];
-      const groupId = pixelGroupMap.get(`${x},${y}`) || null;
+      const layerId = pixelLayerMap.get(`${x},${y}`) || null;
 
       resultPixels[y][x] = {
-        groupId,
+        layerId,
         color: color || { r: 0, g: 0, b: 0, a: 0 },
       };
     }
   }
 
-  return { pixels: resultPixels, groups };
+  return { pixels: resultPixels, layers };
 }
 
-// Merge similar groups (optional post-processing)
-export function mergeSimilarGroups(
+// Merge similar layers (optional post-processing)
+export function mergeSimilarLayers(
   pixels: PixelData[][],
-  groups: Group[],
-  threshold = COLOR_SIMILARITY_THRESHOLD,
+  layers: Layer[],
+  threshold: number = COLOR_SIMILARITY_THRESHOLD,
   applyNoiseFromThreshold = true
-): { pixels: PixelData[][]; groups: Group[] } {
-  if (groups.length <= 1) return { pixels, groups };
+): { pixels: PixelData[][]; layers: Layer[] } {
+  if (layers.length <= 1) return { pixels, layers };
 
   const noiseSettings = applyNoiseFromThreshold
     ? calculateNoiseFromThreshold(threshold)
     : null;
 
-  const groupMap = new Map<string, string>(); // oldId -> newId (for merged groups)
-  const newGroups: Group[] = [];
+  const layerMap = new Map<string, string>(); // oldId -> newId (for merged layers)
+  const newLayers: Layer[] = [];
 
-  for (const group of groups) {
-    // Find if there's an existing group with similar color
+  for (const layer of layers) {
+    // Find if there's an existing layer with similar color
     let merged = false;
-    for (const existingGroup of newGroups) {
-      if (areColorsSimilar(group.baseColor, existingGroup.baseColor, threshold)) {
-        groupMap.set(group.id, existingGroup.id);
+    for (const existingLayer of newLayers) {
+      if (areColorsSimilar(layer.baseColor, existingLayer.baseColor, threshold)) {
+        layerMap.set(layer.id, existingLayer.id);
         merged = true;
         break;
       }
     }
 
     if (!merged) {
-      const newGroup = { ...group };
+      const newLayer = { ...layer };
       // Apply noise settings if merging with threshold
       if (noiseSettings) {
-        newGroup.noiseSettings = {
-          brightness: Math.max(newGroup.noiseSettings.brightness, noiseSettings.brightness),
-          hue: Math.max(newGroup.noiseSettings.hue, noiseSettings.hue),
+        newLayer.noiseSettings = {
+          brightness: Math.max(newLayer.noiseSettings.brightness, noiseSettings.brightness),
+          hue: Math.max(newLayer.noiseSettings.hue, noiseSettings.hue),
         };
       }
-      newGroups.push(newGroup);
-      groupMap.set(group.id, group.id);
+      newLayers.push(newLayer);
+      layerMap.set(layer.id, layer.id);
     }
   }
 
-  // Update pixel group references
+  // Update pixel layer references
   const newPixels = pixels.map((row) =>
     row.map((pixel) => ({
       ...pixel,
-      groupId: pixel.groupId ? (groupMap.get(pixel.groupId) || pixel.groupId) : null,
+      layerId: pixel.layerId ? (layerMap.get(pixel.layerId) || pixel.layerId) : null,
     }))
   );
 
-  return { pixels: newPixels, groups: newGroups };
+  return { pixels: newPixels, layers: newLayers };
 }
 
-// Merge two specific groups into one
-export function mergeGroups(
+// Merge two specific layers into one
+export function mergeLayers(
   pixels: PixelData[][],
-  groups: Group[],
-  sourceGroupId: string,
-  targetGroupId: string
-): { pixels: PixelData[][]; groups: Group[] } {
-  if (sourceGroupId === targetGroupId) return { pixels, groups };
+  layers: Layer[],
+  sourceLayerId: string,
+  targetLayerId: string
+): { pixels: PixelData[][]; layers: Layer[] } {
+  if (sourceLayerId === targetLayerId) return { pixels, layers };
 
-  const sourceGroup = groups.find(g => g.id === sourceGroupId);
-  const targetGroup = groups.find(g => g.id === targetGroupId);
+  const sourceLayer = layers.find(l => l.id === sourceLayerId);
+  const targetLayer = layers.find(l => l.id === targetLayerId);
 
-  if (!sourceGroup || !targetGroup) return { pixels, groups };
+  if (!sourceLayer || !targetLayer) return { pixels, layers };
 
-  // Remove source group from list
-  const newGroups = groups.filter(g => g.id !== sourceGroupId);
+  // Remove source layer from list
+  const newLayers = layers.filter(l => l.id !== sourceLayerId);
 
-  // Update pixel group references (source -> target)
+  // Update pixel layer references (source -> target)
   const newPixels = pixels.map((row) =>
     row.map((pixel) => ({
       ...pixel,
-      groupId: pixel.groupId === sourceGroupId ? targetGroupId : pixel.groupId,
+      layerId: pixel.layerId === sourceLayerId ? targetLayerId : pixel.layerId,
     }))
   );
 
-  return { pixels: newPixels, groups: newGroups };
+  return { pixels: newPixels, layers: newLayers };
 }
 
-// Split a group by re-analyzing color similarity within the group
-// Returns multiple new groups based on color clusters
-export function splitGroupByColor(
+// Split a layer by re-analyzing color similarity within the layer
+// Returns multiple new layers based on color clusters
+export function splitLayerByColor(
   pixels: PixelData[][],
-  groups: Group[],
-  groupId: string,
-  colorThreshold = COLOR_SIMILARITY_THRESHOLD,
+  layers: Layer[],
+  layerId: string,
+  colorThreshold: number = COLOR_SIMILARITY_THRESHOLD,
   applyNoiseFromThreshold = true
-): { pixels: PixelData[][]; groups: Group[] } {
-  const group = groups.find(g => g.id === groupId);
-  if (!group) return { pixels, groups };
+): { pixels: PixelData[][]; layers: Layer[] } {
+  const layer = layers.find(l => l.id === layerId);
+  if (!layer) return { pixels, layers };
 
-  // Collect all pixels belonging to this group
-  const groupPixels: { x: number; y: number; color: RGBA }[] = [];
+  // Collect all pixels belonging to this layer
+  const layerPixels: { x: number; y: number; color: RGBA }[] = [];
   for (let y = 0; y < SKIN_HEIGHT; y++) {
     for (let x = 0; x < SKIN_WIDTH; x++) {
-      if (pixels[y][x].groupId === groupId) {
-        groupPixels.push({ x, y, color: pixels[y][x].color });
+      if (pixels[y][x].layerId === layerId) {
+        layerPixels.push({ x, y, color: pixels[y][x].color });
       }
     }
   }
 
-  if (groupPixels.length === 0) return { pixels, groups };
+  if (layerPixels.length === 0) return { pixels, layers };
 
-  // Use Union-Find to create sub-groups based on color similarity and adjacency
-  const uf = new UnionFind(groupPixels.length);
+  // Use Union-Find to create sub-layers based on color similarity and adjacency
+  const uf = new UnionFind(layerPixels.length);
   const pixelIndexMap = new Map<string, number>();
 
-  groupPixels.forEach((p, i) => {
+  layerPixels.forEach((p, i) => {
     pixelIndexMap.set(`${p.x},${p.y}`, i);
   });
 
-  // Connect adjacent pixels with similar colors (2D adjacency)
-  for (let i = 0; i < groupPixels.length; i++) {
-    const p1 = groupPixels[i];
+  // Connect adjacent pixels with similar colors (2D adjacency including diagonals)
+  for (let i = 0; i < layerPixels.length; i++) {
+    const p1 = layerPixels[i];
     const neighbors = [
-      { x: p1.x + 1, y: p1.y },
-      { x: p1.x, y: p1.y + 1 },
+      { x: p1.x + 1, y: p1.y },     // right
+      { x: p1.x, y: p1.y + 1 },     // bottom
+      { x: p1.x + 1, y: p1.y + 1 }, // bottom-right (diagonal)
+      { x: p1.x - 1, y: p1.y + 1 }, // bottom-left (diagonal)
     ];
 
     for (const n of neighbors) {
       const key = `${n.x},${n.y}`;
       const j = pixelIndexMap.get(key);
       if (j !== undefined) {
-        const p2 = groupPixels[j];
+        const p2 = layerPixels[j];
         if (areColorsSimilar(p1.color, p2.color, colorThreshold)) {
           uf.union(i, j);
         }
@@ -709,8 +747,8 @@ export function splitGroupByColor(
     const i = pixelIndexMap.get(`${p1.x},${p1.y}`);
     const j = pixelIndexMap.get(`${p2.x},${p2.y}`);
     if (i !== undefined && j !== undefined) {
-      const color1 = groupPixels[i].color;
-      const color2 = groupPixels[j].color;
+      const color1 = layerPixels[i].color;
+      const color2 = layerPixels[j].color;
       if (areColorsSimilar(color1, color2, colorThreshold)) {
         uf.union(i, j);
       }
@@ -719,24 +757,24 @@ export function splitGroupByColor(
 
   // Collect sub-components
   const components = new Map<number, { x: number; y: number; color: RGBA }[]>();
-  for (let i = 0; i < groupPixels.length; i++) {
+  for (let i = 0; i < layerPixels.length; i++) {
     const root = uf.find(i);
     if (!components.has(root)) {
       components.set(root, []);
     }
-    components.get(root)!.push(groupPixels[i]);
+    components.get(root)!.push(layerPixels[i]);
   }
 
   // If only one component, no split needed
-  if (components.size <= 1) return { pixels, groups };
+  if (components.size <= 1) return { pixels, layers };
 
   // Calculate noise settings
   const noiseSettings = applyNoiseFromThreshold
     ? calculateNoiseFromThreshold(colorThreshold)
     : { brightness: 0, hue: 0 };
 
-  // Create new groups for each component
-  const newGroups = groups.filter(g => g.id !== groupId);
+  // Create new layers for each component
+  const newLayers = layers.filter(l => l.id !== layerId);
   const newPixels = pixels.map(row => row.map(p => ({ ...p, color: { ...p.color } })));
 
   let subIndex = 1;
@@ -755,19 +793,23 @@ export function splitGroupByColor(
       a: 255,
     };
 
-    const newGroupId = generateId();
-    const newGroup: Group = {
-      id: newGroupId,
-      name: `${group.name}-${subIndex}`,
+    const newLayerId = generateId();
+    const newLayer: Layer = {
+      id: newLayerId,
+      name: `${layer.name}-${subIndex}`,
       baseColor: avgColor,
       noiseSettings: { ...noiseSettings },
+      groupId: null,
+      order: newLayers.length,
+      layerType: layer.layerType,
+      visible: true,
     };
-    newGroups.push(newGroup);
+    newLayers.push(newLayer);
 
     // Update pixels
     for (const p of componentPixels) {
       newPixels[p.y][p.x] = {
-        groupId: newGroupId,
+        layerId: newLayerId,
         color: { ...avgColor },
       };
     }
@@ -775,30 +817,30 @@ export function splitGroupByColor(
     subIndex++;
   }
 
-  return { pixels: newPixels, groups: newGroups };
+  return { pixels: newPixels, layers: newLayers };
 }
 
-// Split selected pixels from a group into a new group
-export function splitGroupBySelection(
+// Split selected pixels from a layer into a new layer
+export function splitLayerBySelection(
   pixels: PixelData[][],
-  groups: Group[],
-  groupId: string,
+  layers: Layer[],
+  layerId: string,
   selectedPixels: { x: number; y: number }[]
-): { pixels: PixelData[][]; groups: Group[]; newGroupId: string | null } {
-  const group = groups.find(g => g.id === groupId);
-  if (!group || selectedPixels.length === 0) {
-    return { pixels, groups, newGroupId: null };
+): { pixels: PixelData[][]; layers: Layer[]; newLayerId: string | null } {
+  const layer = layers.find(l => l.id === layerId);
+  if (!layer || selectedPixels.length === 0) {
+    return { pixels, layers, newLayerId: null };
   }
 
-  // Filter to only include pixels that actually belong to this group
+  // Filter to only include pixels that actually belong to this layer
   const validPixels = selectedPixels.filter(p =>
     p.x >= 0 && p.x < SKIN_WIDTH &&
     p.y >= 0 && p.y < SKIN_HEIGHT &&
-    pixels[p.y][p.x].groupId === groupId
+    pixels[p.y][p.x].layerId === layerId
   );
 
   if (validPixels.length === 0) {
-    return { pixels, groups, newGroupId: null };
+    return { pixels, layers, newLayerId: null };
   }
 
   // Calculate average color of selected pixels
@@ -816,53 +858,58 @@ export function splitGroupBySelection(
     a: 255,
   };
 
-  // Create new group
-  const newGroupId = generateId();
-  const newGroup: Group = {
-    id: newGroupId,
-    name: `${group.name}-split`,
+  // Create new layer
+  const newLayerId = generateId();
+  const maxOrder = layers.length > 0 ? Math.max(...layers.map(l => l.order)) : -1;
+  const newLayer: Layer = {
+    id: newLayerId,
+    name: `${layer.name}-split`,
     baseColor: avgColor,
-    noiseSettings: { ...group.noiseSettings },
+    noiseSettings: { ...layer.noiseSettings },
+    groupId: layer.groupId,
+    order: maxOrder + 1,
+    layerType: layer.layerType,
+    visible: true,
   };
 
-  const newGroups = [...groups, newGroup];
+  const newLayers = [...layers, newLayer];
 
   // Update pixels
   const newPixels = pixels.map(row => row.map(p => ({ ...p, color: { ...p.color } })));
   for (const p of validPixels) {
     newPixels[p.y][p.x] = {
-      groupId: newGroupId,
+      layerId: newLayerId,
       color: { ...avgColor },
     };
   }
 
-  return { pixels: newPixels, groups: newGroups, newGroupId };
+  return { pixels: newPixels, layers: newLayers, newLayerId };
 }
 
-// Blend border pixels with adjacent different-group pixels
-// This creates a smooth transition at group boundaries
-// If targetGroupId is provided, only blend pixels in that group
+// Blend border pixels with adjacent different-layer pixels
+// This creates a smooth transition at layer boundaries
+// If targetLayerId is provided, only blend pixels in that layer
 export function blendBorderPixels(
   pixels: PixelData[][],
   blendStrength: number = 15, // percentage of blend (0-100)
-  targetGroupId?: string // optional: only blend this specific group
+  targetLayerId?: string // optional: only blend this specific layer
 ): { pixels: PixelData[][] } {
   const newPixels = pixels.map(row => row.map(p => ({ ...p, color: { ...p.color } })));
 
-  // For each pixel, check if it's on a boundary (adjacent to a different group)
+  // For each pixel, check if it's on a boundary (adjacent to a different layer)
   for (let y = 0; y < SKIN_HEIGHT; y++) {
     for (let x = 0; x < SKIN_WIDTH; x++) {
       const pixel = pixels[y][x];
-      if (!pixel.groupId || pixel.color.a === 0) continue;
+      if (!pixel.layerId || pixel.color.a === 0) continue;
 
-      // If targetGroupId is specified, only process pixels in that group
-      if (targetGroupId && pixel.groupId !== targetGroupId) continue;
+      // If targetLayerId is specified, only process pixels in that layer
+      if (targetLayerId && pixel.layerId !== targetLayerId) continue;
 
       // Get current pixel's skin part
       const currentPart = getSkinPart(x, y);
       if (!currentPart) continue;
 
-      // Collect colors of adjacent pixels from different groups
+      // Collect colors of adjacent pixels from different layers
       const adjacentColors: RGBA[] = [];
       const neighbors = [
         { dx: -1, dy: 0 },
@@ -878,7 +925,7 @@ export function blendBorderPixels(
         if (nx < 0 || nx >= SKIN_WIDTH || ny < 0 || ny >= SKIN_HEIGHT) continue;
 
         const neighbor = pixels[ny][nx];
-        if (!neighbor.groupId || neighbor.color.a === 0) continue;
+        if (!neighbor.layerId || neighbor.color.a === 0) continue;
 
         // Check if neighbor is in same body part (to respect UV boundaries)
         const neighborPart = getSkinPart(nx, ny);
@@ -889,15 +936,15 @@ export function blendBorderPixels(
         const neighborBodyPart = getBodyPartName(neighborPart, true);
         if (currentBodyPart !== neighborBodyPart) continue;
 
-        // If different group, add to adjacent colors
-        if (neighbor.groupId !== pixel.groupId) {
+        // If different layer, add to adjacent colors
+        if (neighbor.layerId !== pixel.layerId) {
           adjacentColors.push(neighbor.color);
         }
       }
 
       // If this pixel is on a boundary, blend it
       if (adjacentColors.length > 0) {
-        // Calculate average of adjacent different-group colors
+        // Calculate average of adjacent different-layer colors
         let totalR = 0, totalG = 0, totalB = 0;
         for (const c of adjacentColors) {
           totalR += c.r;

@@ -1,4 +1,5 @@
-import { Pencil, Eraser, Square, Pipette, Undo2, Redo2 } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { Pencil, Eraser, Square, Pipette, Undo2, Redo2, Palette, Sparkles, ShieldOff, Shield } from 'lucide-react';
 import { Button } from '@components/ui/button';
 import {
   Tooltip,
@@ -6,19 +7,62 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@components/ui/tooltip';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@components/ui/popover';
+import { ColorPicker } from '@components/ui/color-picker';
 import { useEditorStore } from '../../stores/editorStore';
 import type { ToolType } from '../../types/editor';
-import { useEffect } from 'react';
+import { rgbaToHex } from '../../types/editor';
+import { GenerateOptionsDialog } from './GroupPanel';
 
 const tools: { type: ToolType; icon: React.ReactNode; label: string; shortcut: string }[] = [
-  { type: 'pencil', icon: <Pencil className="h-4 w-4" />, label: 'Pencil', shortcut: 'P' },
-  { type: 'eraser', icon: <Eraser className="h-4 w-4" />, label: 'Eraser', shortcut: 'E' },
-  { type: 'rectangle', icon: <Square className="h-4 w-4" />, label: 'Rectangle', shortcut: 'R' },
-  { type: 'eyedropper', icon: <Pipette className="h-4 w-4" />, label: 'Eyedropper', shortcut: 'I' },
+  { type: 'pencil', icon: <Pencil className="h-5 w-5" />, label: 'ペンシル', shortcut: 'P' },
+  { type: 'eraser', icon: <Eraser className="h-5 w-5" />, label: '消しゴム', shortcut: 'E' },
+  { type: 'rectangle', icon: <Square className="h-5 w-5" />, label: '矩形', shortcut: 'R' },
+  { type: 'eyedropper', icon: <Pipette className="h-5 w-5" />, label: 'スポイト', shortcut: 'I' },
 ];
 
 export function Toolbar() {
-  const { activeTool, setActiveTool, undo, redo, history, historyIndex } = useEditorStore();
+  // Use individual selectors to minimize re-renders
+  const activeTool = useEditorStore((state) => state.activeTool);
+  const setActiveTool = useEditorStore((state) => state.setActiveTool);
+  const undo = useEditorStore((state) => state.undo);
+  const redo = useEditorStore((state) => state.redo);
+  const history = useEditorStore((state) => state.history);
+  const historyIndex = useEditorStore((state) => state.historyIndex);
+  const activeLayerId = useEditorStore((state) => state.activeLayerId);
+  const layers = useEditorStore((state) => state.layers);
+  const pixels = useEditorStore((state) => state.pixels);
+  const drawingColor = useEditorStore((state) => state.drawingColor);
+  const setDrawingColor = useEditorStore((state) => state.setDrawingColor);
+  const generateLayers = useEditorStore((state) => state.generateLayers);
+  const preservePixels = useEditorStore((state) => state.preservePixels);
+  const togglePreservePixels = useEditorStore((state) => state.togglePreservePixels);
+
+  const [generateDialogOpen, setGenerateDialogOpen] = useState(false);
+
+  // Check if active layer is in direct (multi-color) mode
+  const activeLayer = activeLayerId ? layers.find(l => l.id === activeLayerId) : null;
+  const isDirectMode = activeLayer?.layerType === 'direct' || layers.length === 0;
+
+  // Check if there are ungrouped pixels (pixels with color but no layer) - memoized
+  const hasUngroupedPixels = useMemo(() => {
+    for (const row of pixels) {
+      for (const pixel of row) {
+        if (pixel.color.a > 0 && pixel.layerId === null) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }, [pixels]);
+
+  const handleGenerate = (options: { thresholdValue: number; applyNoise: boolean }) => {
+    generateLayers({ thresholdValue: options.thresholdValue, applyNoise: options.applyNoise });
+  };
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -66,14 +110,15 @@ export function Toolbar() {
   const canRedo = historyIndex < history.length - 1;
 
   return (
-    <TooltipProvider>
-      <div className="flex w-14 flex-col items-center gap-2 border-r border-border bg-card py-4">
+    <TooltipProvider delayDuration={300}>
+      <div className="flex w-16 flex-col items-center gap-1.5 border-r border-border bg-card py-3">
         {tools.map((tool) => (
           <Tooltip key={tool.type}>
             <TooltipTrigger asChild>
               <Button
                 variant={activeTool === tool.type ? 'default' : 'ghost'}
                 size="icon"
+                className="h-10 w-10"
                 onClick={() => setActiveTool(tool.type)}
               >
                 {tool.icon}
@@ -85,21 +130,86 @@ export function Toolbar() {
           </Tooltip>
         ))}
 
-        <div className="my-2 h-px w-8 bg-border" />
+        <div className="my-1.5 h-px w-10 bg-border" />
+
+        {/* Preserve pixels toggle */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant={preservePixels ? 'default' : 'ghost'}
+              size="icon"
+              className="h-10 w-10"
+              onClick={togglePreservePixels}
+            >
+              {preservePixels ? <Shield className="h-5 w-5" /> : <ShieldOff className="h-5 w-5" />}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="right">
+            <p>{preservePixels ? '上書き禁止モード (有効)' : '上書き禁止モード (無効)'}</p>
+          </TooltipContent>
+        </Tooltip>
+
+        {/* Drawing color picker for direct mode */}
+        {isDirectMode && (
+          <Popover>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <PopoverTrigger asChild>
+                  <button
+                    className="h-10 w-10 rounded-md border-2 border-border hover:border-muted-foreground transition-colors flex items-center justify-center"
+                    style={{ backgroundColor: rgbaToHex(drawingColor) }}
+                  >
+                    <Palette className="h-4 w-4 drop-shadow-[0_0_2px_rgba(255,255,255,0.8)]" style={{ color: drawingColor.r + drawingColor.g + drawingColor.b > 380 ? '#000' : '#fff' }} />
+                  </button>
+                </PopoverTrigger>
+              </TooltipTrigger>
+              <TooltipContent side="right">
+                <p>描画カラー</p>
+              </TooltipContent>
+            </Tooltip>
+            <PopoverContent side="right" className="w-56">
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-foreground">描画カラー</p>
+                <ColorPicker color={drawingColor} onChange={setDrawingColor} />
+              </div>
+            </PopoverContent>
+          </Popover>
+        )}
+
+        {hasUngroupedPixels && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-10 w-10"
+                onClick={() => setGenerateDialogOpen(true)}
+              >
+                <Sparkles className="h-5 w-5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              <p>レイヤーを自動生成</p>
+            </TooltipContent>
+          </Tooltip>
+        )}
+
+        <div className="flex-1" />
 
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
               variant="ghost"
               size="icon"
+              className="h-10 w-10"
               onClick={undo}
               disabled={!canUndo}
             >
-              <Undo2 className="h-4 w-4" />
+              <Undo2 className="h-5 w-5" />
             </Button>
           </TooltipTrigger>
           <TooltipContent side="right">
-            <p>Undo (Ctrl+Z)</p>
+            <p>元に戻す (Ctrl+Z)</p>
           </TooltipContent>
         </Tooltip>
 
@@ -108,17 +218,26 @@ export function Toolbar() {
             <Button
               variant="ghost"
               size="icon"
+              className="h-10 w-10"
               onClick={redo}
               disabled={!canRedo}
             >
-              <Redo2 className="h-4 w-4" />
+              <Redo2 className="h-5 w-5" />
             </Button>
           </TooltipTrigger>
           <TooltipContent side="right">
-            <p>Redo (Ctrl+Y)</p>
+            <p>やり直し (Ctrl+Y)</p>
           </TooltipContent>
         </Tooltip>
       </div>
+
+      <GenerateOptionsDialog
+        open={generateDialogOpen}
+        onOpenChange={setGenerateDialogOpen}
+        onGenerate={handleGenerate}
+        title="レイヤーを自動生成"
+        description="ピクセルの色から類似色をグループ化してレイヤーを生成します。"
+      />
     </TooltipProvider>
   );
 }

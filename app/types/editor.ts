@@ -6,25 +6,45 @@ export interface RGBA {
   a: number; // 0-255
 }
 
-// Pixel data with group association
+// Pixel data with layer association
 export interface PixelData {
-  groupId: string | null; // null = transparent
+  layerId: string | null; // null = transparent
   color: RGBA; // actual display color (after noise applied)
 }
 
-// Noise settings for a group
+// Material type for noise generation
+export type MaterialType = 'hair' | 'cloth' | 'skin' | 'metal' | 'plastic' | 'other';
+
+// Noise settings for a layer
 export interface NoiseSettings {
   brightness: number; // 0-100
   hue: number; // 0-100
+  material?: MaterialType; // Material type for noise characteristics
 }
 
-// Color group
-export interface Group {
+// Color layer
+export interface Layer {
   id: string;
   name: string;
   baseColor: RGBA;
   noiseSettings: NoiseSettings;
+  groupId: string | null; // null = ungrouped
+  order: number; // for sorting within group or at root level
+  layerType: LayerType; // 'direct' = draw with any color, 'singleColor' = use baseColor
+  visible: boolean; // whether the layer is visible in canvas/preview
 }
+
+// Layer group (for organizing layers)
+export interface LayerGroup {
+  id: string;
+  name: string;
+  collapsed: boolean;
+  order: number; // for sorting groups
+  visible: boolean; // whether all layers in the group are visible
+}
+
+// Legacy alias for backwards compatibility
+export type Group = Layer;
 
 // Tool types
 export type ToolType = 'pencil' | 'eraser' | 'rectangle' | 'eyedropper';
@@ -32,13 +52,48 @@ export type ToolType = 'pencil' | 'eraser' | 'rectangle' | 'eyedropper';
 // Model type
 export type ModelType = 'steve' | 'alex';
 
+// Layer type - 'direct' allows multi-color drawing, 'singleColor' uses base color only
+export type LayerType = 'direct' | 'singleColor';
+
 // Theme type
 export type ThemeType = 'light' | 'dark' | 'system';
 
-// History entry for undo/redo
+// Color palette entry
+export interface PaletteColor {
+  id: string;
+  color: RGBA;
+  name?: string;
+}
+
+// Pixel change for diff-based history
+export interface PixelChange {
+  x: number;
+  y: number;
+  oldPixel: PixelData;
+  newPixel: PixelData;
+}
+
+// Layer change for diff-based history
+export interface LayerChange {
+  type: 'add' | 'remove' | 'update';
+  layerId: string;
+  oldLayer?: Layer;
+  newLayer?: Layer;
+}
+
+// Layer group change for diff-based history
+export interface LayerGroupChange {
+  type: 'add' | 'remove' | 'update';
+  groupId: string;
+  oldGroup?: LayerGroup;
+  newGroup?: LayerGroup;
+}
+
+// History entry for undo/redo (diff-based)
 export interface HistoryEntry {
-  pixels: PixelData[][];
-  groups: Group[];
+  pixelChanges: PixelChange[];
+  layerChanges: LayerChange[];
+  layerGroupChanges: LayerGroupChange[];
 }
 
 // Skin part regions for UV mapping
@@ -54,6 +109,7 @@ export interface SkinRegion {
 // Constants
 export const SKIN_WIDTH = 64;
 export const SKIN_HEIGHT = 64;
+// With diff-based history, each entry is much smaller (only changed pixels)
 export const MAX_HISTORY = 50;
 
 // Skin part definitions (standard 64x64 skin format)
@@ -243,7 +299,7 @@ export function createEmptyPixels(): PixelData[][] {
     pixels[y] = [];
     for (let x = 0; x < SKIN_WIDTH; x++) {
       pixels[y][x] = {
-        groupId: null,
+        layerId: null,
         color: { r: 0, g: 0, b: 0, a: 0 },
       };
     }

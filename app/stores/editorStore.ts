@@ -1,12 +1,19 @@
 import { create } from 'zustand';
 import {
   type PixelData,
-  type Group,
+  type Layer,
+  type LayerGroup,
+  type LayerType,
   type ToolType,
   type ModelType,
   type ThemeType,
   type HistoryEntry,
+  type PixelChange,
+  type LayerChange,
+  type LayerGroupChange,
   type RGBA,
+  type PaletteColor,
+  type MaterialType,
   SKIN_WIDTH,
   SKIN_HEIGHT,
   MAX_HISTORY,
@@ -14,32 +21,34 @@ import {
   generateId,
 } from '../types/editor';
 import {
-  generateGroupsFromImageData,
-  mergeSimilarGroups,
-  mergeGroups,
-  splitGroupByColor,
-  splitGroupBySelection,
+  generateLayersFromImageData,
+  mergeSimilarLayers,
+  mergeLayers,
+  splitLayerByColor,
+  splitLayerBySelection,
   blendBorderPixels,
   COLOR_THRESHOLD_PRESETS,
   type ColorThresholdPreset,
-} from '../lib/groupGenerator';
+} from '../lib/layerGenerator';
 
 interface EditorState {
   // Canvas data
   pixels: PixelData[][];
-  groups: Group[];
+  layers: Layer[];
+  layerGroups: LayerGroup[];
 
   // Selection state
-  activeGroupId: string | null;
+  activeLayerId: string | null;
   activeTool: ToolType;
-  highlightedGroupId: string | null;
+  highlightedLayerId: string | null;
 
-  // Direct drawing color (used when no groups exist)
+  // Direct drawing color (used when no layers exist)
   drawingColor: RGBA;
 
   // Settings
   modelType: ModelType;
   showLayer2: boolean;
+  preservePixels: boolean; // When true, don't overwrite existing pixels
   theme: ThemeType;
 
   // History
@@ -49,25 +58,44 @@ interface EditorState {
   // Preview update version (incremented when 3D preview should update)
   previewVersion: number;
 
+  // Color palette
+  palette: PaletteColor[];
+
+
   // Actions
-  setPixel: (x: number, y: number, groupId: string | null) => void;
-  setPixelRect: (x1: number, y1: number, x2: number, y2: number, groupId: string | null) => void;
+  setPixel: (x: number, y: number, layerId: string | null) => void;
+  setPixelRect: (x1: number, y1: number, x2: number, y2: number, layerId: string | null) => void;
   commitDrawing: () => void; // Call when drawing ends to update 3D preview
   setActiveTool: (tool: ToolType) => void;
-  setActiveGroup: (groupId: string | null) => void;
-  setHighlightedGroup: (groupId: string | null) => void;
+  setActiveLayer: (layerId: string | null) => void;
+  setHighlightedLayer: (layerId: string | null) => void;
   setDrawingColor: (color: RGBA) => void;
 
-  // Group actions
-  createGroup: (name: string, color: RGBA) => string;
-  updateGroupColor: (groupId: string, color: RGBA) => void;
-  updateGroupName: (groupId: string, name: string) => void;
-  deleteGroup: (groupId: string) => void;
-  applyNoise: (groupId: string, brightness: number, hue: number, brightnessDirection?: 'both' | 'positive' | 'negative', hueDirection?: 'both' | 'positive' | 'negative', material?: MaterialType) => void;
+  // Layer actions
+  createLayer: (name: string, color: RGBA, layerType?: LayerType) => string;
+  updateLayerColor: (layerId: string, color: RGBA) => void;
+  updateLayerName: (layerId: string, name: string) => void;
+  updateLayerType: (layerId: string, layerType: LayerType) => void;
+  toggleLayerVisibility: (layerId: string) => void;
+  deleteLayer: (layerId: string) => void;
+  applyNoise: (layerId: string, brightness: number, hue: number, brightnessDirection?: 'both' | 'positive' | 'negative', hueDirection?: 'both' | 'positive' | 'negative', material?: MaterialType) => void;
+  resetNoise: (layerId: string) => void;
+  reorderLayer: (layerId: string, newOrder: number, newGroupId: string | null) => void;
+  duplicateLayer: (layerId: string) => string | null;
+
+  // Layer group actions
+  createLayerGroup: (name: string) => string;
+  updateLayerGroupName: (groupId: string, name: string) => void;
+  deleteLayerGroup: (groupId: string) => void;
+  toggleLayerGroupCollapsed: (groupId: string) => void;
+  toggleLayerGroupVisibility: (groupId: string) => void;
+  reorderLayerGroup: (groupId: string, newOrder: number) => void;
+  moveLayerToGroup: (layerId: string, groupId: string | null) => void;
 
   // Settings actions
   setModelType: (type: ModelType) => void;
   toggleLayer2: () => void;
+  togglePreservePixels: () => void;
   setTheme: (theme: ThemeType) => void;
 
   // History actions
@@ -77,40 +105,202 @@ interface EditorState {
 
   // File actions
   loadFromImageData: (imageData: ImageData) => void;
-  generateGroups: (options?: { threshold?: ColorThresholdPreset; thresholdValue?: number; applyNoise?: boolean }) => void;
-  mergeGroupsById: (sourceGroupId: string, targetGroupId: string) => void;
-  mergeSimilarGroupsAction: (options?: { threshold?: ColorThresholdPreset; thresholdValue?: number; applyNoise?: boolean }) => void;
-  splitGroupByColorAction: (groupId: string, options?: { threshold?: ColorThresholdPreset; thresholdValue?: number; applyNoise?: boolean }) => void;
-  splitGroupBySelectionAction: (groupId: string, selectedPixels: { x: number; y: number }[]) => string | null;
-  blendBordersAction: (blendStrength?: number, groupId?: string) => void;
+  generateLayers: (options?: { threshold?: ColorThresholdPreset; thresholdValue?: number; applyNoise?: boolean }) => void;
+  mergeLayersById: (sourceLayerId: string, targetLayerId: string) => void;
+  mergeSimilarLayersAction: (options?: { threshold?: ColorThresholdPreset; thresholdValue?: number; applyNoise?: boolean }) => void;
+  splitLayerByColorAction: (layerId: string, options?: { threshold?: ColorThresholdPreset; thresholdValue?: number; applyNoise?: boolean }) => void;
+  splitLayerBySelectionAction: (layerId: string, selectedPixels: { x: number; y: number }[]) => string | null;
+  blendBordersAction: (blendStrength?: number, layerId?: string) => void;
   getImageData: () => ImageData;
   reset: () => void;
+
+  // Palette actions
+  addToPalette: (color: RGBA, name?: string) => void;
+  removeFromPalette: (id: string) => void;
+  updatePaletteColor: (id: string, color: RGBA) => void;
+  renamePaletteColor: (id: string, name: string) => void;
+  clearPalette: () => void;
 }
 
 // Helper to deep clone pixels
+// Performance optimization: Only clone when actually modifying
 function clonePixels(pixels: PixelData[][]): PixelData[][] {
-  return pixels.map((row) =>
-    row.map((pixel) => ({
-      ...pixel,
-      color: { ...pixel.color },
-    }))
-  );
+  // Use a more efficient cloning approach - rows are cloned on demand
+  const cloned: PixelData[][] = new Array(pixels.length);
+  for (let y = 0; y < pixels.length; y++) {
+    const row = pixels[y];
+    const newRow: PixelData[] = new Array(row.length);
+    for (let x = 0; x < row.length; x++) {
+      const pixel = row[x];
+      newRow[x] = {
+        layerId: pixel.layerId,
+        color: { r: pixel.color.r, g: pixel.color.g, b: pixel.color.b, a: pixel.color.a },
+      };
+    }
+    cloned[y] = newRow;
+  }
+  return cloned;
 }
 
-// Helper to deep clone groups
-function cloneGroups(groups: Group[]): Group[] {
-  return groups.map((group) => ({
-    ...group,
-    baseColor: { ...group.baseColor },
-    noiseSettings: { ...group.noiseSettings },
+// Helper to deep clone layers
+function cloneLayers(layers: Layer[]): Layer[] {
+  return layers.map((layer) => ({
+    ...layer,
+    baseColor: { ...layer.baseColor },
+    noiseSettings: { ...layer.noiseSettings },
   }));
+}
+
+// Helper to deep clone layer groups
+function cloneLayerGroups(groups: LayerGroup[]): LayerGroup[] {
+  return groups.map((group) => ({ ...group }));
+}
+
+// Helper to clone a single pixel
+function clonePixel(pixel: PixelData): PixelData {
+  return {
+    layerId: pixel.layerId,
+    color: { r: pixel.color.r, g: pixel.color.g, b: pixel.color.b, a: pixel.color.a },
+  };
+}
+
+// Helper to clone a single layer
+function cloneLayer(layer: Layer): Layer {
+  return {
+    ...layer,
+    baseColor: { ...layer.baseColor },
+    noiseSettings: { ...layer.noiseSettings },
+  };
+}
+
+// Snapshot of state before changes (for diff calculation)
+let snapshotPixels: PixelData[][] | null = null;
+let snapshotLayers: Layer[] | null = null;
+let snapshotLayerGroups: LayerGroup[] | null = null;
+
+// Take a snapshot of current state before making changes
+function takeSnapshot(pixels: PixelData[][], layers: Layer[], layerGroups: LayerGroup[]) {
+  snapshotPixels = clonePixels(pixels);
+  snapshotLayers = cloneLayers(layers);
+  snapshotLayerGroups = cloneLayerGroups(layerGroups);
+}
+
+// Calculate diff between snapshot and current state
+function calculateDiff(
+  currentPixels: PixelData[][],
+  currentLayers: Layer[],
+  currentLayerGroups: LayerGroup[]
+): HistoryEntry | null {
+  if (!snapshotPixels || !snapshotLayers || !snapshotLayerGroups) {
+    return null;
+  }
+
+  const pixelChanges: PixelChange[] = [];
+  const layerChanges: LayerChange[] = [];
+  const layerGroupChanges: LayerGroupChange[] = [];
+
+  // Calculate pixel changes
+  for (let y = 0; y < SKIN_HEIGHT; y++) {
+    for (let x = 0; x < SKIN_WIDTH; x++) {
+      const oldPixel = snapshotPixels[y][x];
+      const newPixel = currentPixels[y][x];
+      if (
+        oldPixel.layerId !== newPixel.layerId ||
+        oldPixel.color.r !== newPixel.color.r ||
+        oldPixel.color.g !== newPixel.color.g ||
+        oldPixel.color.b !== newPixel.color.b ||
+        oldPixel.color.a !== newPixel.color.a
+      ) {
+        pixelChanges.push({
+          x,
+          y,
+          oldPixel: clonePixel(oldPixel),
+          newPixel: clonePixel(newPixel),
+        });
+      }
+    }
+  }
+
+  // Calculate layer changes
+  const oldLayerMap = new Map(snapshotLayers.map(l => [l.id, l]));
+  const newLayerMap = new Map(currentLayers.map(l => [l.id, l]));
+
+  // Find removed and updated layers
+  for (const oldLayer of snapshotLayers) {
+    const newLayer = newLayerMap.get(oldLayer.id);
+    if (!newLayer) {
+      layerChanges.push({ type: 'remove', layerId: oldLayer.id, oldLayer: cloneLayer(oldLayer) });
+    } else if (
+      oldLayer.name !== newLayer.name ||
+      oldLayer.baseColor.r !== newLayer.baseColor.r ||
+      oldLayer.baseColor.g !== newLayer.baseColor.g ||
+      oldLayer.baseColor.b !== newLayer.baseColor.b ||
+      oldLayer.baseColor.a !== newLayer.baseColor.a ||
+      oldLayer.noiseSettings.brightness !== newLayer.noiseSettings.brightness ||
+      oldLayer.noiseSettings.hue !== newLayer.noiseSettings.hue ||
+      oldLayer.groupId !== newLayer.groupId ||
+      oldLayer.order !== newLayer.order ||
+      oldLayer.layerType !== newLayer.layerType ||
+      oldLayer.visible !== newLayer.visible
+    ) {
+      layerChanges.push({ type: 'update', layerId: oldLayer.id, oldLayer: cloneLayer(oldLayer), newLayer: cloneLayer(newLayer) });
+    }
+  }
+
+  // Find added layers
+  for (const newLayer of currentLayers) {
+    if (!oldLayerMap.has(newLayer.id)) {
+      layerChanges.push({ type: 'add', layerId: newLayer.id, newLayer: cloneLayer(newLayer) });
+    }
+  }
+
+  // Calculate layer group changes
+  const oldGroupMap = new Map(snapshotLayerGroups.map(g => [g.id, g]));
+  const newGroupMap = new Map(currentLayerGroups.map(g => [g.id, g]));
+
+  // Find removed and updated groups
+  for (const oldGroup of snapshotLayerGroups) {
+    const newGroup = newGroupMap.get(oldGroup.id);
+    if (!newGroup) {
+      layerGroupChanges.push({ type: 'remove', groupId: oldGroup.id, oldGroup: { ...oldGroup } });
+    } else if (
+      oldGroup.name !== newGroup.name ||
+      oldGroup.collapsed !== newGroup.collapsed ||
+      oldGroup.order !== newGroup.order ||
+      oldGroup.visible !== newGroup.visible
+    ) {
+      layerGroupChanges.push({ type: 'update', groupId: oldGroup.id, oldGroup: { ...oldGroup }, newGroup: { ...newGroup } });
+    }
+  }
+
+  // Find added groups
+  for (const newGroup of currentLayerGroups) {
+    if (!oldGroupMap.has(newGroup.id)) {
+      layerGroupChanges.push({ type: 'add', groupId: newGroup.id, newGroup: { ...newGroup } });
+    }
+  }
+
+  // If no changes, return null
+  if (pixelChanges.length === 0 && layerChanges.length === 0 && layerGroupChanges.length === 0) {
+    return null;
+  }
+
+  return { pixelChanges, layerChanges, layerGroupChanges };
+}
+
+// Clear snapshot after saving to history
+function clearSnapshot() {
+  snapshotPixels = null;
+  snapshotLayers = null;
+  snapshotLayerGroups = null;
 }
 
 // Noise direction type
 type NoiseDirection = 'both' | 'positive' | 'negative';
 
 // Material type for noise generation
-export type MaterialType = 'hair' | 'cloth' | 'skin' | 'metal' | 'plastic' | 'other';
+// MaterialType is imported from '../types/editor'
+export type { MaterialType } from '../types/editor';
 
 // Apply brightness noise to a color
 function applyBrightnessNoise(color: RGBA, intensity: number, direction: NoiseDirection = 'both'): RGBA {
@@ -353,53 +543,89 @@ function applyMaterialNoise(
 export const useEditorStore = create<EditorState>((set, get) => ({
   // Initial state
   pixels: createEmptyPixels(),
-  groups: [],
-  activeGroupId: null,
+  layers: [],
+  layerGroups: [],
+  activeLayerId: null,
   activeTool: 'pencil',
-  highlightedGroupId: null,
+  highlightedLayerId: null,
   drawingColor: { r: 0, g: 0, b: 0, a: 255 }, // Default black
   modelType: 'steve',
   showLayer2: true,
+  preservePixels: false,
   theme: 'system',
   history: [],
   historyIndex: -1,
   previewVersion: 0,
+  palette: [],
 
   // Pixel actions
-  setPixel: (x, y, groupId) => {
+  setPixel: (x, y, layerId) => {
     if (x < 0 || x >= SKIN_WIDTH || y < 0 || y >= SKIN_HEIGHT) return;
 
-    const { pixels, groups, drawingColor, saveToHistory } = get();
-    const newPixels = clonePixels(pixels);
+    const { pixels, layers, layerGroups, drawingColor, preservePixels } = get();
 
-    if (groupId === null) {
+    // Check if pixel needs to change
+    const currentPixel = pixels[y][x];
+
+    // Skip if preservePixels is enabled and pixel already has content
+    if (preservePixels && currentPixel.color.a > 0) {
+      return;
+    }
+
+    // Take snapshot if this is the first change in a drawing session
+    if (!snapshotPixels) {
+      takeSnapshot(pixels, layers, layerGroups);
+    }
+
+    let newColor: RGBA;
+    let newLayerId: string | null;
+
+    if (layerId === null) {
       // Eraser - set to transparent
-      newPixels[y][x] = {
-        groupId: null,
-        color: { r: 0, g: 0, b: 0, a: 0 },
-      };
+      newLayerId = null;
+      newColor = { r: 0, g: 0, b: 0, a: 0 };
     } else {
-      const group = groups.find((g) => g.id === groupId);
-      if (group) {
-        newPixels[y][x] = {
-          groupId,
-          color: { ...group.baseColor },
-        };
-      } else if (groups.length === 0) {
-        // No groups exist - draw directly with drawingColor
-        newPixels[y][x] = {
-          groupId: null,
-          color: { ...drawingColor },
-        };
+      const layer = layers.find((l) => l.id === layerId);
+      if (layer) {
+        newLayerId = layerId;
+        newColor = layer.layerType === 'direct' ? drawingColor : layer.baseColor;
+      } else if (layers.length === 0) {
+        newLayerId = null;
+        newColor = drawingColor;
+      } else {
+        return; // No valid layer, do nothing
       }
     }
 
-    saveToHistory();
+    // Skip if pixel is already the same
+    if (
+      currentPixel.layerId === newLayerId &&
+      currentPixel.color.r === newColor.r &&
+      currentPixel.color.g === newColor.g &&
+      currentPixel.color.b === newColor.b &&
+      currentPixel.color.a === newColor.a
+    ) {
+      return;
+    }
+
+    // Create a shallow copy of the pixel array and only update the changed row
+    const newPixels = [...pixels];
+    newPixels[y] = [...pixels[y]];
+    newPixels[y][x] = {
+      layerId: newLayerId,
+      color: { ...newColor },
+    };
+
+    // Note: History is NOT saved here - it's saved in commitDrawing() when drawing ends
     set({ pixels: newPixels });
   },
 
-  setPixelRect: (x1, y1, x2, y2, groupId) => {
-    const { pixels, groups, drawingColor, saveToHistory, previewVersion } = get();
+  setPixelRect: (x1, y1, x2, y2, layerId) => {
+    const { pixels, layers, layerGroups, drawingColor, preservePixels, saveToHistory, previewVersion } = get();
+
+    // Take snapshot before making changes
+    takeSnapshot(pixels, layers, layerGroups);
+
     const newPixels = clonePixels(pixels);
 
     const minX = Math.max(0, Math.min(x1, x2));
@@ -407,24 +633,31 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const minY = Math.max(0, Math.min(y1, y2));
     const maxY = Math.min(SKIN_HEIGHT - 1, Math.max(y1, y2));
 
-    const group = groupId ? groups.find((g) => g.id === groupId) : null;
+    const layer = layerId ? layers.find((l) => l.id === layerId) : null;
 
     for (let y = minY; y <= maxY; y++) {
       for (let x = minX; x <= maxX; x++) {
-        if (groupId === null) {
+        // Skip if preservePixels is enabled and pixel already has content
+        if (preservePixels && pixels[y][x].color.a > 0) {
+          continue;
+        }
+
+        if (layerId === null) {
           newPixels[y][x] = {
-            groupId: null,
+            layerId: null,
             color: { r: 0, g: 0, b: 0, a: 0 },
           };
-        } else if (group) {
+        } else if (layer) {
+          // For 'direct' layers, use drawingColor; for 'singleColor', use baseColor
+          const colorToUse = layer.layerType === 'direct' ? drawingColor : layer.baseColor;
           newPixels[y][x] = {
-            groupId,
-            color: { ...group.baseColor },
+            layerId,
+            color: { ...colorToUse },
           };
-        } else if (groups.length === 0) {
-          // No groups exist - draw directly with drawingColor
+        } else if (layers.length === 0) {
+          // No layers exist - draw directly with drawingColor
           newPixels[y][x] = {
-            groupId: null,
+            layerId: null,
             color: { ...drawingColor },
           };
         }
@@ -436,98 +669,123 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   commitDrawing: () => {
+    const { saveToHistory } = get();
+    saveToHistory();
     set((state) => ({ previewVersion: state.previewVersion + 1 }));
   },
 
   setActiveTool: (tool) => set({ activeTool: tool }),
-  setActiveGroup: (groupId) => set({ activeGroupId: groupId }),
-  setHighlightedGroup: (groupId) => set({ highlightedGroupId: groupId }),
+  setActiveLayer: (layerId) => set({ activeLayerId: layerId }),
+  setHighlightedLayer: (layerId) => set({ highlightedLayerId: layerId }),
   setDrawingColor: (color) => set({ drawingColor: color }),
 
-  // Group actions
-  createGroup: (name, color) => {
+  // Layer actions
+  createLayer: (name, color, layerType = 'singleColor') => {
     const id = generateId();
-    const newGroup: Group = {
+    const { layers } = get();
+    const maxOrder = layers.length > 0 ? Math.max(...layers.map(l => l.order)) : -1;
+    const newLayer: Layer = {
       id,
       name,
       baseColor: color,
       noiseSettings: { brightness: 0, hue: 0 },
+      groupId: null,
+      order: maxOrder + 1,
+      layerType,
+      visible: true,
     };
     set((state) => ({
-      groups: [...state.groups, newGroup],
-      activeGroupId: id,
+      layers: [...state.layers, newLayer],
+      activeLayerId: id,
     }));
     return id;
   },
 
-  updateGroupColor: (groupId, color) => {
-    const { pixels, groups } = get();
-    const newGroups = groups.map((g) =>
-      g.id === groupId ? { ...g, baseColor: color } : g
+  updateLayerColor: (layerId, color) => {
+    const { pixels, layers } = get();
+    const newLayers = layers.map((l) =>
+      l.id === layerId ? { ...l, baseColor: color } : l
     );
 
-    // Update all pixels belonging to this group
+    // Update all pixels belonging to this layer
     const newPixels = pixels.map((row) =>
       row.map((pixel) =>
-        pixel.groupId === groupId
+        pixel.layerId === layerId
           ? { ...pixel, color: { ...color } }
           : pixel
       )
     );
 
-    set((state) => ({ groups: newGroups, pixels: newPixels, previewVersion: state.previewVersion + 1 }));
+    set((state) => ({ layers: newLayers, pixels: newPixels, previewVersion: state.previewVersion + 1 }));
   },
 
-  updateGroupName: (groupId, name) => {
+  updateLayerName: (layerId, name) => {
     set((state) => ({
-      groups: state.groups.map((g) =>
-        g.id === groupId ? { ...g, name } : g
+      layers: state.layers.map((l) =>
+        l.id === layerId ? { ...l, name } : l
       ),
     }));
   },
 
-  deleteGroup: (groupId) => {
-    const { pixels, groups, activeGroupId } = get();
+  updateLayerType: (layerId, layerType) => {
+    set((state) => ({
+      layers: state.layers.map((l) =>
+        l.id === layerId ? { ...l, layerType } : l
+      ),
+    }));
+  },
 
-    // Remove group
-    const newGroups = groups.filter((g) => g.id !== groupId);
+  toggleLayerVisibility: (layerId) => {
+    set((state) => ({
+      layers: state.layers.map((l) =>
+        l.id === layerId ? { ...l, visible: !l.visible } : l
+      ),
+      previewVersion: state.previewVersion + 1,
+    }));
+  },
 
-    // Clear pixels belonging to this group
+  deleteLayer: (layerId) => {
+    const { pixels, layers, activeLayerId } = get();
+
+    // Remove layer
+    const newLayers = layers.filter((l) => l.id !== layerId);
+
+    // Clear pixels belonging to this layer
     const newPixels = pixels.map((row) =>
       row.map((pixel) =>
-        pixel.groupId === groupId
-          ? { groupId: null, color: { r: 0, g: 0, b: 0, a: 0 } }
+        pixel.layerId === layerId
+          ? { layerId: null, color: { r: 0, g: 0, b: 0, a: 0 } }
           : pixel
       )
     );
 
     set((state) => ({
-      groups: newGroups,
+      layers: newLayers,
       pixels: newPixels,
-      activeGroupId: activeGroupId === groupId ? null : activeGroupId,
+      activeLayerId: activeLayerId === layerId ? null : activeLayerId,
       previewVersion: state.previewVersion + 1,
     }));
   },
 
-  applyNoise: (groupId, brightness, hue, brightnessDirection = 'both', hueDirection = 'both', material = 'other') => {
-    const { pixels, groups } = get();
-    const group = groups.find((g) => g.id === groupId);
-    if (!group) return;
+  applyNoise: (layerId, brightness, hue, brightnessDirection = 'both', hueDirection = 'both', material = 'other') => {
+    const { pixels, layers } = get();
+    const layer = layers.find((l) => l.id === layerId);
+    if (!layer) return;
 
-    // Update group noise settings
-    const newGroups = groups.map((g) =>
-      g.id === groupId
-        ? { ...g, noiseSettings: { brightness, hue } }
-        : g
+    // Update layer noise settings (including material)
+    const newLayers = layers.map((l) =>
+      l.id === layerId
+        ? { ...l, noiseSettings: { brightness, hue, material } }
+        : l
     );
 
-    // Apply noise to all pixels in this group using material-specific function
+    // Apply noise to all pixels in this layer using material-specific function
     const newPixels = pixels.map((row) =>
       row.map((pixel) => {
-        if (pixel.groupId !== groupId) return pixel;
+        if (pixel.layerId !== layerId) return pixel;
 
         const newColor = applyMaterialNoise(
-          group.baseColor,
+          layer.baseColor,
           brightness,
           hue,
           brightnessDirection,
@@ -538,26 +796,190 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       })
     );
 
-    set((state) => ({ groups: newGroups, pixels: newPixels, previewVersion: state.previewVersion + 1 }));
+    set((state) => ({ layers: newLayers, pixels: newPixels, previewVersion: state.previewVersion + 1 }));
+  },
+
+  resetNoise: (layerId) => {
+    const { pixels, layers } = get();
+    const layer = layers.find((l) => l.id === layerId);
+    if (!layer) return;
+
+    // Reset noise settings to zero
+    const newLayers = layers.map((l) =>
+      l.id === layerId
+        ? { ...l, noiseSettings: { brightness: 0, hue: 0, material: undefined } }
+        : l
+    );
+
+    // Reset all pixels in this layer to the base color
+    const newPixels = pixels.map((row) =>
+      row.map((pixel) => {
+        if (pixel.layerId !== layerId) return pixel;
+        return { ...pixel, color: { ...layer.baseColor } };
+      })
+    );
+
+    set((state) => ({ layers: newLayers, pixels: newPixels, previewVersion: state.previewVersion + 1 }));
+  },
+
+  reorderLayer: (layerId, newOrder, newGroupId) => {
+    set((state) => ({
+      layers: state.layers.map((l) =>
+        l.id === layerId ? { ...l, order: newOrder, groupId: newGroupId } : l
+      ),
+    }));
+  },
+
+  duplicateLayer: (layerId) => {
+    const { pixels, layers, layerGroups, saveToHistory } = get();
+    const layer = layers.find((l) => l.id === layerId);
+    if (!layer) return null;
+
+    // Take snapshot before making changes
+    takeSnapshot(pixels, layers, layerGroups);
+
+    // Create a new layer with copied properties
+    const newId = generateId();
+    const maxOrder = layers.length > 0 ? Math.max(...layers.map(l => l.order)) : -1;
+    const newLayer: Layer = {
+      ...layer,
+      id: newId,
+      name: `${layer.name} のコピー`,
+      baseColor: { ...layer.baseColor },
+      noiseSettings: { ...layer.noiseSettings },
+      order: maxOrder + 1,
+      groupId: null, // Don't preserve group
+    };
+
+    // Clone pixels and apply copied pixels to new layer
+    const newPixels = clonePixels(pixels);
+    for (let y = 0; y < SKIN_HEIGHT; y++) {
+      for (let x = 0; x < SKIN_WIDTH; x++) {
+        const pixel = pixels[y][x];
+        if (pixel.layerId === layerId) {
+          newPixels[y][x] = {
+            layerId: newId,
+            color: { ...pixel.color },
+          };
+        }
+      }
+    }
+
+    saveToHistory();
+    set((state) => ({
+      pixels: newPixels,
+      layers: [...state.layers, newLayer],
+      activeLayerId: newId,
+      previewVersion: state.previewVersion + 1,
+    }));
+
+    return newId;
+  },
+
+  // Layer group actions
+  createLayerGroup: (name) => {
+    const id = generateId();
+    const { layerGroups } = get();
+    const maxOrder = layerGroups.length > 0 ? Math.max(...layerGroups.map(g => g.order)) : -1;
+    const newGroup: LayerGroup = {
+      id,
+      name,
+      collapsed: false,
+      order: maxOrder + 1,
+      visible: true,
+    };
+    set((state) => ({
+      layerGroups: [...state.layerGroups, newGroup],
+    }));
+    return id;
+  },
+
+  updateLayerGroupName: (groupId, name) => {
+    set((state) => ({
+      layerGroups: state.layerGroups.map((g) =>
+        g.id === groupId ? { ...g, name } : g
+      ),
+    }));
+  },
+
+  deleteLayerGroup: (groupId) => {
+    set((state) => ({
+      layerGroups: state.layerGroups.filter((g) => g.id !== groupId),
+      // Move layers out of the deleted group
+      layers: state.layers.map((l) =>
+        l.groupId === groupId ? { ...l, groupId: null } : l
+      ),
+    }));
+  },
+
+  toggleLayerGroupCollapsed: (groupId) => {
+    set((state) => ({
+      layerGroups: state.layerGroups.map((g) =>
+        g.id === groupId ? { ...g, collapsed: !g.collapsed } : g
+      ),
+    }));
+  },
+
+  toggleLayerGroupVisibility: (groupId) => {
+    set((state) => ({
+      layerGroups: state.layerGroups.map((g) =>
+        g.id === groupId ? { ...g, visible: !g.visible } : g
+      ),
+      previewVersion: state.previewVersion + 1,
+    }));
+  },
+
+  reorderLayerGroup: (groupId, newOrder) => {
+    set((state) => ({
+      layerGroups: state.layerGroups.map((g) =>
+        g.id === groupId ? { ...g, order: newOrder } : g
+      ),
+    }));
+  },
+
+  moveLayerToGroup: (layerId, groupId) => {
+    set((state) => {
+      const layer = state.layers.find((l) => l.id === layerId);
+      if (!layer) return state;
+
+      // Calculate new order within target group
+      const targetLayers = state.layers.filter((l) => l.groupId === groupId);
+      const maxOrder = targetLayers.length > 0 ? Math.max(...targetLayers.map(l => l.order)) : -1;
+
+      return {
+        layers: state.layers.map((l) =>
+          l.id === layerId ? { ...l, groupId, order: maxOrder + 1 } : l
+        ),
+      };
+    });
   },
 
   // Settings actions
   setModelType: (type) => set({ modelType: type }),
   toggleLayer2: () => set((state) => ({ showLayer2: !state.showLayer2 })),
+  togglePreservePixels: () => set((state) => ({ preservePixels: !state.preservePixels })),
   setTheme: (theme) => set({ theme }),
 
-  // History actions
+  // History actions (diff-based)
   saveToHistory: () => {
-    const { pixels, groups, history, historyIndex } = get();
+    const { pixels, layers, layerGroups, history, historyIndex } = get();
+
+    // Calculate diff from snapshot
+    const diff = calculateDiff(pixels, layers, layerGroups);
+
+    // Clear snapshot after calculating diff
+    clearSnapshot();
+
+    // If no changes, don't save
+    if (!diff) {
+      return;
+    }
 
     // Truncate future history if we're not at the end
     const newHistory = history.slice(0, historyIndex + 1);
 
-    // Add current state
-    newHistory.push({
-      pixels: clonePixels(pixels),
-      groups: cloneGroups(groups),
-    });
+    // Add diff entry
+    newHistory.push(diff);
 
     // Limit history size
     if (newHistory.length > MAX_HISTORY) {
@@ -571,39 +993,126 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   undo: () => {
-    const { history, historyIndex } = get();
-    if (historyIndex <= 0) return;
+    const { pixels, layers, layerGroups, history, historyIndex } = get();
+    if (historyIndex < 0) return;
 
-    const newIndex = historyIndex - 1;
-    const entry = history[newIndex];
+    const entry = history[historyIndex];
 
-    set({
-      pixels: clonePixels(entry.pixels),
-      groups: cloneGroups(entry.groups),
-      historyIndex: newIndex,
-    });
+    // Apply reverse of the diff
+    const newPixels = [...pixels];
+    for (const change of entry.pixelChanges) {
+      if (newPixels[change.y] === pixels[change.y]) {
+        newPixels[change.y] = [...pixels[change.y]];
+      }
+      newPixels[change.y][change.x] = clonePixel(change.oldPixel);
+    }
+
+    // Reverse layer changes
+    let newLayers = [...layers];
+    for (const change of entry.layerChanges) {
+      if (change.type === 'add') {
+        // Reverse add = remove
+        newLayers = newLayers.filter(l => l.id !== change.layerId);
+      } else if (change.type === 'remove' && change.oldLayer) {
+        // Reverse remove = add
+        newLayers.push(cloneLayer(change.oldLayer));
+      } else if (change.type === 'update' && change.oldLayer) {
+        // Reverse update = restore old
+        newLayers = newLayers.map(l => l.id === change.layerId ? cloneLayer(change.oldLayer!) : l);
+      }
+    }
+
+    // Reverse layer group changes
+    let newLayerGroups = [...layerGroups];
+    for (const change of entry.layerGroupChanges) {
+      if (change.type === 'add') {
+        newLayerGroups = newLayerGroups.filter(g => g.id !== change.groupId);
+      } else if (change.type === 'remove' && change.oldGroup) {
+        newLayerGroups.push({ ...change.oldGroup });
+      } else if (change.type === 'update' && change.oldGroup) {
+        newLayerGroups = newLayerGroups.map(g => g.id === change.groupId ? { ...change.oldGroup! } : g);
+      }
+    }
+
+    set((state) => ({
+      pixels: newPixels,
+      layers: newLayers,
+      layerGroups: newLayerGroups,
+      historyIndex: historyIndex - 1,
+      previewVersion: state.previewVersion + 1,
+    }));
   },
 
   redo: () => {
-    const { history, historyIndex } = get();
+    const { pixels, layers, layerGroups, history, historyIndex } = get();
     if (historyIndex >= history.length - 1) return;
 
     const newIndex = historyIndex + 1;
     const entry = history[newIndex];
 
-    set({
-      pixels: clonePixels(entry.pixels),
-      groups: cloneGroups(entry.groups),
+    // Apply the diff
+    const newPixels = [...pixels];
+    for (const change of entry.pixelChanges) {
+      if (newPixels[change.y] === pixels[change.y]) {
+        newPixels[change.y] = [...pixels[change.y]];
+      }
+      newPixels[change.y][change.x] = clonePixel(change.newPixel);
+    }
+
+    // Apply layer changes
+    let newLayers = [...layers];
+    for (const change of entry.layerChanges) {
+      if (change.type === 'add' && change.newLayer) {
+        newLayers.push(cloneLayer(change.newLayer));
+      } else if (change.type === 'remove') {
+        newLayers = newLayers.filter(l => l.id !== change.layerId);
+      } else if (change.type === 'update' && change.newLayer) {
+        newLayers = newLayers.map(l => l.id === change.layerId ? cloneLayer(change.newLayer!) : l);
+      }
+    }
+
+    // Apply layer group changes
+    let newLayerGroups = [...layerGroups];
+    for (const change of entry.layerGroupChanges) {
+      if (change.type === 'add' && change.newGroup) {
+        newLayerGroups.push({ ...change.newGroup });
+      } else if (change.type === 'remove') {
+        newLayerGroups = newLayerGroups.filter(g => g.id !== change.groupId);
+      } else if (change.type === 'update' && change.newGroup) {
+        newLayerGroups = newLayerGroups.map(g => g.id === change.groupId ? { ...change.newGroup! } : g);
+      }
+    }
+
+    set((state) => ({
+      pixels: newPixels,
+      layers: newLayers,
+      layerGroups: newLayerGroups,
       historyIndex: newIndex,
-    });
+      previewVersion: state.previewVersion + 1,
+    }));
   },
 
   // File actions
   loadFromImageData: (imageData) => {
-    const { saveToHistory } = get();
+    const { pixels, layers, layerGroups, saveToHistory } = get();
+    takeSnapshot(pixels, layers, layerGroups);
     const newPixels: PixelData[][] = [];
 
-    // Load pixels without generating groups
+    // Create a single layer for all imported pixels
+    const layerId = generateId();
+    const newLayer: Layer = {
+      id: layerId,
+      name: 'インポート画像',
+      baseColor: { r: 128, g: 128, b: 128, a: 255 }, // Neutral gray as base
+      noiseSettings: { brightness: 0, hue: 0 },
+      groupId: null,
+      order: 0,
+      layerType: 'direct', // Multi-color mode for imported images
+      visible: true,
+    };
+
+    // Load pixels and assign to the layer
+    let hasPixels = false;
     for (let y = 0; y < SKIN_HEIGHT; y++) {
       newPixels[y] = [];
       for (let x = 0; x < SKIN_WIDTH; x++) {
@@ -614,13 +1123,22 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           const b = imageData.data[i + 2];
           const a = imageData.data[i + 3];
 
-          newPixels[y][x] = {
-            groupId: null, // No group assigned yet
-            color: { r, g, b, a },
-          };
+          // Assign non-transparent pixels to the layer
+          if (a > 0) {
+            hasPixels = true;
+            newPixels[y][x] = {
+              layerId: layerId,
+              color: { r, g, b, a },
+            };
+          } else {
+            newPixels[y][x] = {
+              layerId: null,
+              color: { r: 0, g: 0, b: 0, a: 0 },
+            };
+          }
         } else {
           newPixels[y][x] = {
-            groupId: null,
+            layerId: null,
             color: { r: 0, g: 0, b: 0, a: 0 },
           };
         }
@@ -630,19 +1148,21 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     saveToHistory();
     set((state) => ({
       pixels: newPixels,
-      groups: [],
-      activeGroupId: null,
+      layers: hasPixels ? [newLayer] : [],
+      layerGroups: [],
+      activeLayerId: hasPixels ? layerId : null,
       previewVersion: state.previewVersion + 1,
     }));
   },
 
-  generateGroups: (options = {}) => {
-    const { pixels, saveToHistory } = get();
+  generateLayers: (options = {}) => {
+    const { pixels, layers, layerGroups, saveToHistory } = get();
+    takeSnapshot(pixels, layers, layerGroups);
     const { threshold = 'normal', thresholdValue: customThreshold, applyNoise = true } = options;
     // Use custom threshold value if provided, otherwise use preset
     const finalThreshold = customThreshold ?? COLOR_THRESHOLD_PRESETS[threshold];
 
-    // Convert current pixels to ImageData for group generation
+    // Convert current pixels to ImageData for layer generation
     const imageData = new ImageData(SKIN_WIDTH, SKIN_HEIGHT);
     for (let y = 0; y < SKIN_HEIGHT; y++) {
       for (let x = 0; x < SKIN_WIDTH; x++) {
@@ -655,8 +1175,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       }
     }
 
-    // Generate groups based on color similarity, adjacency, and body parts
-    const { pixels: newPixels, groups: newGroups } = generateGroupsFromImageData(
+    // Generate layers based on color similarity, adjacency, and body parts
+    const { pixels: newPixels, layers: newLayers } = generateLayersFromImageData(
       imageData,
       finalThreshold,
       applyNoise
@@ -665,40 +1185,42 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     saveToHistory();
     set((state) => ({
       pixels: newPixels,
-      groups: newGroups,
-      activeGroupId: newGroups.length > 0 ? newGroups[0].id : null,
+      layers: newLayers,
+      activeLayerId: newLayers.length > 0 ? newLayers[0].id : null,
       previewVersion: state.previewVersion + 1,
     }));
   },
 
-  mergeGroupsById: (sourceGroupId, targetGroupId) => {
-    const { pixels, groups, saveToHistory, activeGroupId } = get();
+  mergeLayersById: (sourceLayerId, targetLayerId) => {
+    const { pixels, layers, layerGroups, saveToHistory } = get();
+    takeSnapshot(pixels, layers, layerGroups);
 
-    const { pixels: newPixels, groups: newGroups } = mergeGroups(
+    const { pixels: newPixels, layers: newLayers } = mergeLayers(
       pixels,
-      groups,
-      sourceGroupId,
-      targetGroupId
+      layers,
+      sourceLayerId,
+      targetLayerId
     );
 
     saveToHistory();
     set((state) => ({
       pixels: newPixels,
-      groups: newGroups,
-      activeGroupId: state.activeGroupId === sourceGroupId ? targetGroupId : state.activeGroupId,
+      layers: newLayers,
+      activeLayerId: state.activeLayerId === sourceLayerId ? targetLayerId : state.activeLayerId,
       previewVersion: state.previewVersion + 1,
     }));
   },
 
-  mergeSimilarGroupsAction: (options = {}) => {
-    const { pixels, groups, saveToHistory } = get();
+  mergeSimilarLayersAction: (options = {}) => {
+    const { pixels, layers, layerGroups, saveToHistory } = get();
+    takeSnapshot(pixels, layers, layerGroups);
     const { threshold = 'normal', thresholdValue: customThreshold, applyNoise = true } = options;
     // Use custom threshold value if provided, otherwise use preset
     const finalThreshold = customThreshold ?? COLOR_THRESHOLD_PRESETS[threshold];
 
-    const { pixels: newPixels, groups: newGroups } = mergeSimilarGroups(
+    const { pixels: newPixels, layers: newLayers } = mergeSimilarLayers(
       pixels,
-      groups,
+      layers,
       finalThreshold,
       applyNoise
     );
@@ -706,22 +1228,23 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     saveToHistory();
     set((state) => ({
       pixels: newPixels,
-      groups: newGroups,
-      activeGroupId: newGroups.length > 0 ? newGroups[0].id : null,
+      layers: newLayers,
+      activeLayerId: newLayers.length > 0 ? newLayers[0].id : null,
       previewVersion: state.previewVersion + 1,
     }));
   },
 
-  splitGroupByColorAction: (groupId, options = {}) => {
-    const { pixels, groups, saveToHistory } = get();
+  splitLayerByColorAction: (layerId, options = {}) => {
+    const { pixels, layers, layerGroups, saveToHistory } = get();
+    takeSnapshot(pixels, layers, layerGroups);
     const { threshold = 'strict', thresholdValue: customThreshold, applyNoise = false } = options;
     // Use custom threshold value if provided, otherwise use preset
     const finalThreshold = customThreshold ?? COLOR_THRESHOLD_PRESETS[threshold];
 
-    const { pixels: newPixels, groups: newGroups } = splitGroupByColor(
+    const { pixels: newPixels, layers: newLayers } = splitLayerByColor(
       pixels,
-      groups,
-      groupId,
+      layers,
+      layerId,
       finalThreshold,
       applyNoise
     );
@@ -729,38 +1252,40 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     saveToHistory();
     set((state) => ({
       pixels: newPixels,
-      groups: newGroups,
+      layers: newLayers,
       previewVersion: state.previewVersion + 1,
     }));
   },
 
-  splitGroupBySelectionAction: (groupId, selectedPixels) => {
-    const { pixels, groups, saveToHistory } = get();
+  splitLayerBySelectionAction: (layerId, selectedPixels) => {
+    const { pixels, layers, layerGroups, saveToHistory } = get();
+    takeSnapshot(pixels, layers, layerGroups);
 
-    const { pixels: newPixels, groups: newGroups, newGroupId } = splitGroupBySelection(
+    const { pixels: newPixels, layers: newLayers, newLayerId } = splitLayerBySelection(
       pixels,
-      groups,
-      groupId,
+      layers,
+      layerId,
       selectedPixels
     );
 
-    if (newGroupId) {
+    if (newLayerId) {
       saveToHistory();
       set((state) => ({
         pixels: newPixels,
-        groups: newGroups,
-        activeGroupId: newGroupId,
+        layers: newLayers,
+        activeLayerId: newLayerId,
         previewVersion: state.previewVersion + 1,
       }));
     }
 
-    return newGroupId;
+    return newLayerId;
   },
 
-  blendBordersAction: (blendStrength = 15, groupId?: string) => {
-    const { pixels, saveToHistory } = get();
+  blendBordersAction: (blendStrength = 15, layerId?: string) => {
+    const { pixels, layers, layerGroups, saveToHistory } = get();
+    takeSnapshot(pixels, layers, layerGroups);
 
-    const { pixels: newPixels } = blendBorderPixels(pixels, blendStrength, groupId);
+    const { pixels: newPixels } = blendBorderPixels(pixels, blendStrength, layerId);
 
     saveToHistory();
     set((state) => ({ pixels: newPixels, previewVersion: state.previewVersion + 1 }));
@@ -787,12 +1312,48 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   reset: () => {
     set({
       pixels: createEmptyPixels(),
-      groups: [],
-      activeGroupId: null,
+      layers: [],
+      layerGroups: [],
+      activeLayerId: null,
       activeTool: 'pencil',
-      highlightedGroupId: null,
+      highlightedLayerId: null,
       history: [],
       historyIndex: -1,
+      // Note: palette is intentionally NOT reset to preserve user's saved colors
     });
+  },
+
+  // Palette actions
+  addToPalette: (color, name) => {
+    const id = generateId();
+    set((state) => ({
+      palette: [...state.palette, { id, color: { ...color }, name }],
+    }));
+  },
+
+  removeFromPalette: (id) => {
+    set((state) => ({
+      palette: state.palette.filter((p) => p.id !== id),
+    }));
+  },
+
+  updatePaletteColor: (id, color) => {
+    set((state) => ({
+      palette: state.palette.map((p) =>
+        p.id === id ? { ...p, color: { ...color } } : p
+      ),
+    }));
+  },
+
+  renamePaletteColor: (id, name) => {
+    set((state) => ({
+      palette: state.palette.map((p) =>
+        p.id === id ? { ...p, name } : p
+      ),
+    }));
+  },
+
+  clearPalette: () => {
+    set({ palette: [] });
   },
 }));

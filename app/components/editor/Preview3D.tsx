@@ -27,7 +27,7 @@ export function Preview3D() {
   return (
     <div className="flex h-full flex-col bg-muted/30">
       <div className="flex items-center justify-between border-b border-border bg-card px-4 py-2">
-        <span className="text-sm font-medium">3D Preview</span>
+        <span className="text-sm font-medium">3Dプレビュー</span>
         <TooltipProvider>
           <div className="flex items-center gap-2">
             <ButtonGroup>
@@ -42,7 +42,7 @@ export function Preview3D() {
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
-                  <p>Zoom Out</p>
+                  <p>縮小</p>
                 </TooltipContent>
               </Tooltip>
               <Tooltip>
@@ -56,7 +56,7 @@ export function Preview3D() {
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
-                  <p>Zoom In</p>
+                  <p>拡大</p>
                 </TooltipContent>
               </Tooltip>
               <Tooltip>
@@ -70,7 +70,7 @@ export function Preview3D() {
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
-                  <p>Reset View</p>
+                  <p>表示をリセット</p>
                 </TooltipContent>
               </Tooltip>
             </ButtonGroup>
@@ -82,11 +82,11 @@ export function Preview3D() {
                   onClick={() => setAutoRotate(!autoRotate)}
                 >
                   {autoRotate ? <RotateCcw className="mr-1 h-3 w-3" /> : <Pause className="mr-1 h-3 w-3" />}
-                  Rotate
+                  回転
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                <p>Toggle auto rotation</p>
+                <p>自動回転の切り替え</p>
               </TooltipContent>
             </Tooltip>
             <Tooltip>
@@ -97,11 +97,11 @@ export function Preview3D() {
                   onClick={toggleLayer2}
                 >
                   {showLayer2 ? <Eye className="mr-1 h-3 w-3" /> : <EyeOff className="mr-1 h-3 w-3" />}
-                  Layer 2
+                  レイヤー2
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                <p>Toggle layer 2 overlay visibility</p>
+                <p>レイヤー2（外装）の表示を切り替え</p>
               </TooltipContent>
             </Tooltip>
           </div>
