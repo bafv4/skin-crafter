@@ -291,7 +291,7 @@ function MinecraftCharacter({ modelType, autoRotate }: { modelType: ModelType; a
     <group ref={groupRef} position={[0, 0, 0]}>
       {/* Head */}
       <BodyPart
-        position={[0, 1.5, 0]}
+        position={[0, 1.595, 0]}
         size={[1, 1, 1]}
         uvMap={{
           front: [8, 8, 8, 8],
