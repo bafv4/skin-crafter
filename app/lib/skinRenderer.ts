@@ -1,78 +1,83 @@
-import { type PixelData, type Layer, type LayerGroup, SKIN_WIDTH, SKIN_HEIGHT } from '../types/editor';
+import { type RGBA, type Layer, SKIN_WIDTH, SKIN_HEIGHT } from '../types/editor';
 
-// Draw the skin texture on a canvas using ImageData for better performance
+// Cached offscreen canvas for scaled rendering
+let offscreenCanvas: OffscreenCanvas | HTMLCanvasElement | null = null;
+let offscreenCtx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null = null;
+
+function getOffscreenCanvas(): { canvas: OffscreenCanvas | HTMLCanvasElement; ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D } | null {
+  if (offscreenCanvas && offscreenCtx) {
+    return { canvas: offscreenCanvas, ctx: offscreenCtx };
+  }
+
+  try {
+    // Try OffscreenCanvas first (more performant)
+    if (typeof OffscreenCanvas !== 'undefined') {
+      offscreenCanvas = new OffscreenCanvas(SKIN_WIDTH, SKIN_HEIGHT);
+      offscreenCtx = offscreenCanvas.getContext('2d');
+    } else {
+      // Fallback to regular canvas
+      offscreenCanvas = document.createElement('canvas');
+      offscreenCanvas.width = SKIN_WIDTH;
+      offscreenCanvas.height = SKIN_HEIGHT;
+      offscreenCtx = offscreenCanvas.getContext('2d');
+    }
+
+    if (!offscreenCtx) return null;
+    return { canvas: offscreenCanvas, ctx: offscreenCtx };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Draw the composited skin texture on a canvas.
+ * Takes a pre-computed composite (RGBA[][]) instead of raw pixel data.
+ * Optimized: uses ImageData + drawImage scaling for better performance.
+ */
 export function renderSkinToCanvas(
   ctx: CanvasRenderingContext2D,
-  pixels: PixelData[][],
-  scale: number = 1,
-  layers?: Layer[],
-  layerGroups?: LayerGroup[]
+  composite: RGBA[][],
+  scale: number = 1
 ): void {
   const width = SKIN_WIDTH * scale;
   const height = SKIN_HEIGHT * scale;
 
-  // Build a set of hidden layer IDs for quick lookup
-  const hiddenLayerIds = new Set<string>();
-  if (layers && layerGroups) {
-    // First, collect layers in hidden groups
-    const hiddenGroupIds = new Set(
-      layerGroups.filter((g) => !g.visible).map((g) => g.id)
-    );
+  // Create ImageData at native resolution
+  const imageData = ctx.createImageData(SKIN_WIDTH, SKIN_HEIGHT);
+  const data = imageData.data;
 
-    for (const layer of layers) {
-      // Layer is hidden if: the layer itself is not visible, or its group is not visible
-      if (!layer.visible || (layer.groupId && hiddenGroupIds.has(layer.groupId))) {
-        hiddenLayerIds.add(layer.id);
-      }
+  for (let y = 0; y < SKIN_HEIGHT; y++) {
+    const row = composite[y];
+    const rowOffset = y * SKIN_WIDTH * 4;
+    for (let x = 0; x < SKIN_WIDTH; x++) {
+      const pixel = row[x];
+      const idx = rowOffset + x * 4;
+      data[idx] = pixel.r;
+      data[idx + 1] = pixel.g;
+      data[idx + 2] = pixel.b;
+      data[idx + 3] = pixel.a;
     }
   }
 
-  // For scale=1, use ImageData for maximum performance
+  // For scale=1, direct put
   if (scale === 1) {
-    const imageData = ctx.createImageData(SKIN_WIDTH, SKIN_HEIGHT);
-    const data = imageData.data;
-
-    for (let y = 0; y < SKIN_HEIGHT; y++) {
-      for (let x = 0; x < SKIN_WIDTH; x++) {
-        const pixel = pixels[y][x];
-        const idx = (y * SKIN_WIDTH + x) * 4;
-
-        // Skip rendering if pixel belongs to a hidden layer
-        if (pixel.layerId && hiddenLayerIds.has(pixel.layerId)) {
-          data[idx] = 0;
-          data[idx + 1] = 0;
-          data[idx + 2] = 0;
-          data[idx + 3] = 0;
-          continue;
-        }
-
-        data[idx] = pixel.color.r;
-        data[idx + 1] = pixel.color.g;
-        data[idx + 2] = pixel.color.b;
-        data[idx + 3] = pixel.color.a;
-      }
-    }
-
     ctx.putImageData(imageData, 0, 0);
     return;
   }
 
-  // For scaled rendering, use fillRect but avoid string concatenation
-  ctx.clearRect(0, 0, width, height);
-
-  for (let y = 0; y < SKIN_HEIGHT; y++) {
-    for (let x = 0; x < SKIN_WIDTH; x++) {
-      const pixel = pixels[y][x];
-      // Skip rendering if pixel belongs to a hidden layer
-      if (pixel.layerId && hiddenLayerIds.has(pixel.layerId)) {
-        continue;
-      }
-      const { r, g, b, a } = pixel.color;
-      if (a > 0) {
-        ctx.fillStyle = `rgba(${r},${g},${b},${a / 255})`;
-        ctx.fillRect(x * scale, y * scale, scale, scale);
-      }
-    }
+  // For scaled rendering, use offscreen canvas + drawImage (much faster than fillRect per pixel)
+  const offscreen = getOffscreenCanvas();
+  if (offscreen) {
+    offscreen.ctx.putImageData(imageData, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(offscreen.canvas as CanvasImageSource, 0, 0, width, height);
+  } else {
+    // Fallback: direct putImageData at scale 1, then scale context
+    ctx.save();
+    ctx.scale(scale, scale);
+    ctx.imageSmoothingEnabled = false;
+    ctx.putImageData(imageData, 0, 0);
+    ctx.restore();
   }
 }
 
@@ -141,11 +146,13 @@ function drawGridDirect(
   }
 }
 
-// Draw highlight for selected layer
-export function drawGroupHighlight(
+/**
+ * Draw highlight overlay for a specific layer's pixels.
+ * Uses the layer's pixel data directly.
+ */
+export function drawLayerHighlight(
   ctx: CanvasRenderingContext2D,
-  pixels: PixelData[][],
-  layerId: string,
+  layer: Layer,
   scale: number,
   color: string = 'rgba(255, 255, 0, 0.5)'
 ): void {
@@ -153,7 +160,8 @@ export function drawGroupHighlight(
 
   for (let y = 0; y < SKIN_HEIGHT; y++) {
     for (let x = 0; x < SKIN_WIDTH; x++) {
-      if (pixels[y][x].layerId === layerId) {
+      const pixel = layer.pixels[y][x];
+      if (pixel && pixel.a > 0) {
         ctx.fillRect(x * scale, y * scale, scale, scale);
       }
     }
@@ -238,12 +246,13 @@ export async function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
   });
 }
 
-// Download skin as PNG
+/**
+ * Download skin as PNG.
+ * Takes a pre-computed composite (RGBA[][]).
+ */
 export async function downloadSkin(
-  pixels: PixelData[][],
-  filename: string = 'skin.png',
-  layers?: Layer[],
-  layerGroups?: LayerGroup[]
+  composite: RGBA[][],
+  filename: string = 'skin.png'
 ): Promise<void> {
   const canvas = document.createElement('canvas');
   canvas.width = SKIN_WIDTH;
@@ -254,7 +263,7 @@ export async function downloadSkin(
     throw new Error('Failed to get canvas context');
   }
 
-  renderSkinToCanvas(ctx, pixels, 1, layers, layerGroups);
+  renderSkinToCanvas(ctx, composite, 1);
 
   const blob = await canvasToBlob(canvas);
   const url = URL.createObjectURL(blob);

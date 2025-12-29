@@ -21,15 +21,28 @@ import {
 import { CraftingTableIcon } from '@components/icons/CraftingTableIcon';
 import { useEditorStore } from '../../stores/editorStore';
 import { downloadSkin, loadSkinFromFile } from '@lib/skinRenderer';
+import { getPixelEngine } from '@lib/pixelEngine';
 import { useEffect, useRef } from 'react';
-import type { Layer, LayerGroup, PaletteColor, RGBA } from '../../types/editor';
+import type { Layer, LayerGroup, PaletteColor, RGBA, LayerPixels } from '../../types/editor';
+import { createEmptyLayerPixels, SKIN_WIDTH, SKIN_HEIGHT } from '../../types/editor';
 
-// Compact pixel format: [layerIndex, r, g, b, a] or null for transparent
-type CompactPixel = [number, number, number, number, number] | null;
+// Compact pixel format for layer: [r, g, b, a] or null for transparent
+type CompactLayerPixel = [number, number, number, number] | null;
 
 // Compact layer format (array instead of object)
-// [id, name, baseColor[r,g,b,a], noiseSettings[brightness,hue], groupId, order, layerType, visible]
-type CompactLayer = [string, string, [number, number, number, number], [number, number], string | null, number, 'direct' | 'singleColor', boolean];
+// [id, name, baseColor[r,g,b,a], noiseSettings[brightness,hue], groupId, order, layerType, visible, opacity, pixels]
+type CompactLayerV5 = [
+  string, // 0: id
+  string, // 1: name
+  [number, number, number, number], // 2: baseColor
+  [number, number], // 3: noiseSettings [brightness, hue]
+  string | null, // 4: groupId
+  number, // 5: order
+  'direct' | 'singleColor', // 6: layerType
+  boolean, // 7: visible
+  number, // 8: opacity
+  CompactLayerPixel[][] // 9: pixels
+];
 
 // Compact group format
 // [id, name, collapsed, order, visible]
@@ -39,8 +52,12 @@ type CompactGroup = [string, string, boolean, number, boolean];
 // [id, color[r,g,b,a], name?]
 type CompactPalette = [string, [number, number, number, number], string?];
 
+// V4 format (legacy)
+type CompactPixelV4 = [number, number, number, number, number] | null;
+type CompactLayerV4 = [string, string, [number, number, number, number], [number, number], string | null, number, 'direct' | 'singleColor', boolean, number?];
+
 export function Header() {
-  const { pixels, layers, layerGroups, palette, theme, setTheme, loadFromImageData, reset, modelType, setModelType } = useEditorStore();
+  const { layers, layerGroups, palette, theme, setTheme, loadFromImageData, reset, modelType, setModelType, getComposite } = useEditorStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const jsonInputRef = useRef<HTMLInputElement>(null);
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
@@ -64,7 +81,8 @@ export function Header() {
 
   const handleExport = async () => {
     try {
-      await downloadSkin(pixels, 'minecraft-skin.png', layers, layerGroups);
+      const composite = getComposite();
+      await downloadSkin(composite, 'minecraft-skin.png');
     } catch (error) {
       console.error('Failed to export skin:', error);
     }
@@ -72,21 +90,26 @@ export function Header() {
 
   const handleExportJson = () => {
     try {
-      // Build layer ID to index map
-      const layerIdToIndex = new Map<string, number>();
-      layers.forEach((l, i) => layerIdToIndex.set(l.id, i));
+      // Convert layers to compact v5 format (with per-layer pixels)
+      const compactLayers: CompactLayerV5[] = layers.map(l => {
+        // Convert layer pixels to compact format
+        const compactPixels: CompactLayerPixel[][] = l.pixels.map(row =>
+          row.map(p => p === null ? null : [p.r, p.g, p.b, p.a])
+        );
 
-      // Convert layers to compact format
-      const compactLayers: CompactLayer[] = layers.map(l => [
-        l.id,
-        l.name,
-        [l.baseColor.r, l.baseColor.g, l.baseColor.b, l.baseColor.a],
-        [l.noiseSettings.brightness, l.noiseSettings.hue],
-        l.groupId,
-        l.order,
-        l.layerType,
-        l.visible,
-      ]);
+        return [
+          l.id,
+          l.name,
+          [l.baseColor.r, l.baseColor.g, l.baseColor.b, l.baseColor.a],
+          [l.noiseSettings.brightness, l.noiseSettings.hue],
+          l.groupId,
+          l.order,
+          l.layerType,
+          l.visible,
+          l.opacity ?? 100,
+          compactPixels,
+        ];
+      });
 
       // Convert groups to compact format
       const compactGroups: CompactGroup[] = layerGroups.map(g => [
@@ -104,22 +127,11 @@ export function Header() {
           : [p.id, [p.color.r, p.color.g, p.color.b, p.color.a]]
       );
 
-      // Convert pixels to compact format
-      // Use null for transparent pixels, [layerIndex, r, g, b, a] for others
-      const compactPixels: CompactPixel[][] = pixels.map(row =>
-        row.map(p => {
-          if (p.color.a === 0) return null;
-          const layerIndex = p.layerId ? layerIdToIndex.get(p.layerId) ?? -1 : -1;
-          return [layerIndex, p.color.r, p.color.g, p.color.b, p.color.a];
-        })
-      );
-
       const data = {
-        v: 4, // version
+        v: 5, // version 5 - per-layer pixels
         m: modelType === 'steve' ? 0 : 1, // model type: 0=steve, 1=alex
         l: compactLayers,
         g: compactGroups,
-        p: compactPixels,
         c: compactPalette, // color palette
       };
 
@@ -149,26 +161,71 @@ export function Header() {
       const text = await file.text();
       const data = JSON.parse(text);
 
-      if (data.v !== 4) {
-        throw new Error('Unsupported project version. Please use version 4 format.');
-      }
-
       const store = useEditorStore.getState();
 
       // Set model type (0=steve, 1=alex)
       store.setModelType(data.m === 1 ? 'alex' : 'steve');
 
-      // Convert compact layers to full format
-      const importedLayers: Layer[] = (data.l as CompactLayer[]).map(l => ({
-        id: l[0],
-        name: l[1],
-        baseColor: { r: l[2][0], g: l[2][1], b: l[2][2], a: l[2][3] },
-        noiseSettings: { brightness: l[3][0], hue: l[3][1] },
-        groupId: l[4],
-        order: l[5],
-        layerType: l[6],
-        visible: l[7],
-      }));
+      let importedLayers: Layer[];
+
+      if (data.v === 5) {
+        // Version 5 format - per-layer pixels
+        importedLayers = (data.l as CompactLayerV5[]).map(l => {
+          // Convert compact pixels to LayerPixels
+          const pixels: LayerPixels = (l[9] as CompactLayerPixel[][]).map(row =>
+            row.map(p => p === null ? null : { r: p[0], g: p[1], b: p[2], a: p[3] })
+          );
+
+          return {
+            id: l[0],
+            name: l[1],
+            baseColor: { r: l[2][0], g: l[2][1], b: l[2][2], a: l[2][3] },
+            noiseSettings: { brightness: l[3][0], hue: l[3][1] },
+            groupId: l[4],
+            order: l[5],
+            layerType: l[6],
+            visible: l[7],
+            opacity: l[8] ?? 100,
+            pixels,
+          };
+        });
+      } else if (data.v === 4) {
+        // Version 4 format - migrate to v5
+        // In v4, pixels were stored separately with layer references
+        const v4Layers = data.l as CompactLayerV4[];
+        const v4Pixels = data.p as CompactPixelV4[][];
+
+        importedLayers = v4Layers.map((l, layerIndex) => {
+          // Create empty pixels for this layer
+          const pixels = createEmptyLayerPixels();
+
+          // Find all pixels that belong to this layer
+          for (let y = 0; y < SKIN_HEIGHT; y++) {
+            for (let x = 0; x < SKIN_WIDTH; x++) {
+              const p = v4Pixels[y]?.[x];
+              if (p !== null && p[0] === layerIndex) {
+                // This pixel belongs to this layer
+                pixels[y][x] = { r: p[1], g: p[2], b: p[3], a: p[4] };
+              }
+            }
+          }
+
+          return {
+            id: l[0],
+            name: l[1],
+            baseColor: { r: l[2][0], g: l[2][1], b: l[2][2], a: l[2][3] },
+            noiseSettings: { brightness: l[3][0], hue: l[3][1] },
+            groupId: l[4],
+            order: l[5],
+            layerType: l[6],
+            visible: l[7],
+            opacity: l[8] ?? 100,
+            pixels,
+          };
+        });
+      } else {
+        throw new Error('Unsupported project version. Please use version 4 or 5 format.');
+      }
 
       // Convert compact groups to full format
       const importedGroups: LayerGroup[] = (data.g as CompactGroup[]).map(g => ({
@@ -186,32 +243,40 @@ export function Header() {
         name: p[2],
       }));
 
-      // Convert compact pixels to full format
-      const importedPixels = (data.p as CompactPixel[][]).map(row =>
-        row.map(p => {
-          if (p === null) {
-            return { layerId: null, color: { r: 0, g: 0, b: 0, a: 0 } };
+      // Sync layers to PixelEngine
+      const engine = getPixelEngine();
+      engine.clearAllLayers();
+      for (const layer of importedLayers) {
+        engine.createLayer(layer.id, layer.order);
+        // Convert LayerPixels to Uint8ClampedArray
+        const data = new Uint8ClampedArray(SKIN_WIDTH * SKIN_HEIGHT * 4);
+        for (let y = 0; y < SKIN_HEIGHT; y++) {
+          for (let x = 0; x < SKIN_WIDTH; x++) {
+            const pixel = layer.pixels[y]?.[x];
+            const i = (y * SKIN_WIDTH + x) * 4;
+            if (pixel) {
+              data[i] = pixel.r;
+              data[i + 1] = pixel.g;
+              data[i + 2] = pixel.b;
+              data[i + 3] = pixel.a;
+            }
           }
-          const [layerIndex, r, g, b, a] = p;
-          const layerId = layerIndex >= 0 && layerIndex < importedLayers.length
-            ? importedLayers[layerIndex].id
-            : null;
-          return { layerId, color: { r, g, b, a } };
-        })
-      );
+        }
+        engine.setLayerData(layer.id, layer.order, data);
+      }
 
       // Restore state
       useEditorStore.setState({
-        pixels: importedPixels,
         layers: importedLayers,
         layerGroups: importedGroups,
         palette: importedPalette,
         activeLayerId: importedLayers.length > 0 ? importedLayers[0].id : null,
+        compositeCache: null,
         previewVersion: store.previewVersion + 1,
       });
     } catch (error) {
       console.error('Failed to import JSON:', error);
-      alert('プロジェクトファイルの読み込みに失敗しました。バージョン4形式のファイルを使用してください。');
+      alert('プロジェクトファイルの読み込みに失敗しました。バージョン4または5形式のファイルを使用してください。');
     }
 
     e.target.value = '';

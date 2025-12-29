@@ -1,12 +1,14 @@
 import {
   type RGBA,
   type Layer,
-  type PixelData,
+  type LayerPixels,
   type SkinRegion,
   SKIN_WIDTH,
   SKIN_HEIGHT,
   SKIN_PARTS,
   generateId,
+  createEmptyLayerPixels,
+  cloneLayerPixels,
 } from '../types/editor';
 
 // Color similarity threshold presets (0-441, where 441 is max distance in RGB space)
@@ -393,12 +395,15 @@ function calculateNoiseFromThreshold(threshold: number): { brightness: number; h
   };
 }
 
-// Generate layers from image data
+/**
+ * Generate layers from image data.
+ * Each layer will have its own pixel data.
+ */
 export function generateLayersFromImageData(
   imageData: ImageData,
   colorThreshold: number = COLOR_SIMILARITY_THRESHOLD,
   applyNoiseFromThreshold = true
-): { pixels: PixelData[][]; layers: Layer[] } {
+): { layers: Layer[] } {
   const width = Math.min(imageData.width, SKIN_WIDTH);
   const height = Math.min(imageData.height, SKIN_HEIGHT);
 
@@ -544,7 +549,6 @@ export function generateLayersFromImageData(
 
   // Create layers from components
   const layers: Layer[] = [];
-  const pixelLayerMap = new Map<string, string>(); // "x,y" -> layerId
 
   let layerIndex = 1;
   for (const [, pixels] of componentPixels) {
@@ -568,9 +572,14 @@ export function generateLayersFromImageData(
     const partName = part ? getBodyPartName(part) : 'unknown';
     const overlaySuffix = part && part.layer === 2 ? '-overlay' : '';
 
-    const layerId = generateId();
+    // Create layer with its own pixel data
+    const layerPixels = createEmptyLayerPixels();
+    for (const p of pixels) {
+      layerPixels[p.y][p.x] = { ...p.color };
+    }
+
     const layer: Layer = {
-      id: layerId,
+      id: generateId(),
       name: `${partName}${overlaySuffix}-${layerIndex}`,
       baseColor: avgColor,
       noiseSettings: { ...noiseSettings },
@@ -578,64 +587,63 @@ export function generateLayersFromImageData(
       order: layerIndex - 1,
       layerType: 'singleColor',
       visible: true,
+      opacity: 100,
+      pixels: layerPixels,
     };
     layers.push(layer);
-
-    // Map pixels to this layer
-    for (const p of pixels) {
-      pixelLayerMap.set(`${p.x},${p.y}`, layerId);
-    }
 
     layerIndex++;
   }
 
-  // Create final pixel array
-  const resultPixels: PixelData[][] = [];
-  for (let y = 0; y < SKIN_HEIGHT; y++) {
-    resultPixels[y] = [];
-    for (let x = 0; x < SKIN_WIDTH; x++) {
-      const color = colors[y][x];
-      const layerId = pixelLayerMap.get(`${x},${y}`) || null;
-
-      resultPixels[y][x] = {
-        layerId,
-        color: color || { r: 0, g: 0, b: 0, a: 0 },
-      };
-    }
-  }
-
-  return { pixels: resultPixels, layers };
+  return { layers };
 }
 
-// Merge similar layers (optional post-processing)
+/**
+ * Merge similar layers (optional post-processing).
+ * Returns new layers with merged pixel data.
+ */
 export function mergeSimilarLayers(
-  pixels: PixelData[][],
   layers: Layer[],
   threshold: number = COLOR_SIMILARITY_THRESHOLD,
   applyNoiseFromThreshold = true
-): { pixels: PixelData[][]; layers: Layer[] } {
-  if (layers.length <= 1) return { pixels, layers };
+): { layers: Layer[] } {
+  if (layers.length <= 1) return { layers: layers.map(l => ({ ...l, pixels: cloneLayerPixels(l.pixels) })) };
 
   const noiseSettings = applyNoiseFromThreshold
     ? calculateNoiseFromThreshold(threshold)
     : null;
 
-  const layerMap = new Map<string, string>(); // oldId -> newId (for merged layers)
+  // Map old layer ID to new layer (for merged layers)
+  const mergeMap = new Map<string, Layer>();
   const newLayers: Layer[] = [];
 
   for (const layer of layers) {
     // Find if there's an existing layer with similar color
-    let merged = false;
+    let mergedInto: Layer | null = null;
     for (const existingLayer of newLayers) {
       if (areColorsSimilar(layer.baseColor, existingLayer.baseColor, threshold)) {
-        layerMap.set(layer.id, existingLayer.id);
-        merged = true;
+        mergedInto = existingLayer;
         break;
       }
     }
 
-    if (!merged) {
-      const newLayer = { ...layer };
+    if (mergedInto) {
+      // Merge pixels into the existing layer
+      for (let y = 0; y < SKIN_HEIGHT; y++) {
+        for (let x = 0; x < SKIN_WIDTH; x++) {
+          const pixel = layer.pixels[y][x];
+          if (pixel && (!mergedInto.pixels[y][x] || mergedInto.pixels[y][x]!.a === 0)) {
+            mergedInto.pixels[y][x] = { ...pixel };
+          }
+        }
+      }
+      mergeMap.set(layer.id, mergedInto);
+    } else {
+      // Create a new layer with cloned pixels
+      const newLayer: Layer = {
+        ...layer,
+        pixels: cloneLayerPixels(layer.pixels),
+      };
       // Apply noise settings if merging with threshold
       if (noiseSettings) {
         newLayer.noiseSettings = {
@@ -644,72 +652,93 @@ export function mergeSimilarLayers(
         };
       }
       newLayers.push(newLayer);
-      layerMap.set(layer.id, layer.id);
+      mergeMap.set(layer.id, newLayer);
     }
   }
 
-  // Update pixel layer references
-  const newPixels = pixels.map((row) =>
-    row.map((pixel) => ({
-      ...pixel,
-      layerId: pixel.layerId ? (layerMap.get(pixel.layerId) || pixel.layerId) : null,
-    }))
-  );
-
-  return { pixels: newPixels, layers: newLayers };
+  return { layers: newLayers };
 }
 
-// Merge two specific layers into one
+/**
+ * Merge two specific layers into one.
+ * Source layer pixels are merged into target layer.
+ */
 export function mergeLayers(
-  pixels: PixelData[][],
   layers: Layer[],
   sourceLayerId: string,
   targetLayerId: string
-): { pixels: PixelData[][]; layers: Layer[] } {
-  if (sourceLayerId === targetLayerId) return { pixels, layers };
+): { layers: Layer[] } {
+  if (sourceLayerId === targetLayerId) {
+    return { layers: layers.map(l => ({ ...l, pixels: cloneLayerPixels(l.pixels) })) };
+  }
 
   const sourceLayer = layers.find(l => l.id === sourceLayerId);
   const targetLayer = layers.find(l => l.id === targetLayerId);
 
-  if (!sourceLayer || !targetLayer) return { pixels, layers };
+  if (!sourceLayer || !targetLayer) {
+    return { layers: layers.map(l => ({ ...l, pixels: cloneLayerPixels(l.pixels) })) };
+  }
 
-  // Remove source layer from list
-  const newLayers = layers.filter(l => l.id !== sourceLayerId);
+  // Create new layers array, excluding source layer
+  const newLayers: Layer[] = [];
 
-  // Update pixel layer references (source -> target)
-  const newPixels = pixels.map((row) =>
-    row.map((pixel) => ({
-      ...pixel,
-      layerId: pixel.layerId === sourceLayerId ? targetLayerId : pixel.layerId,
-    }))
-  );
+  for (const layer of layers) {
+    if (layer.id === sourceLayerId) {
+      // Skip source layer - it will be merged into target
+      continue;
+    }
 
-  return { pixels: newPixels, layers: newLayers };
+    if (layer.id === targetLayerId) {
+      // Clone target layer and merge source pixels into it
+      const mergedPixels = cloneLayerPixels(layer.pixels);
+      for (let y = 0; y < SKIN_HEIGHT; y++) {
+        for (let x = 0; x < SKIN_WIDTH; x++) {
+          const sourcePixel = sourceLayer.pixels[y][x];
+          if (sourcePixel && sourcePixel.a > 0) {
+            // Source pixel takes priority (drawn on top)
+            mergedPixels[y][x] = { ...sourcePixel };
+          }
+        }
+      }
+      newLayers.push({ ...layer, pixels: mergedPixels });
+    } else {
+      // Clone other layers as-is
+      newLayers.push({ ...layer, pixels: cloneLayerPixels(layer.pixels) });
+    }
+  }
+
+  return { layers: newLayers };
 }
 
-// Split a layer by re-analyzing color similarity within the layer
-// Returns multiple new layers based on color clusters
+/**
+ * Split a layer by re-analyzing color similarity within the layer.
+ * Returns multiple new layers based on color clusters.
+ */
 export function splitLayerByColor(
-  pixels: PixelData[][],
   layers: Layer[],
   layerId: string,
   colorThreshold: number = COLOR_SIMILARITY_THRESHOLD,
   applyNoiseFromThreshold = true
-): { pixels: PixelData[][]; layers: Layer[] } {
+): { layers: Layer[] } {
   const layer = layers.find(l => l.id === layerId);
-  if (!layer) return { pixels, layers };
+  if (!layer) {
+    return { layers: layers.map(l => ({ ...l, pixels: cloneLayerPixels(l.pixels) })) };
+  }
 
-  // Collect all pixels belonging to this layer
+  // Collect all non-null pixels from this layer
   const layerPixels: { x: number; y: number; color: RGBA }[] = [];
   for (let y = 0; y < SKIN_HEIGHT; y++) {
     for (let x = 0; x < SKIN_WIDTH; x++) {
-      if (pixels[y][x].layerId === layerId) {
-        layerPixels.push({ x, y, color: pixels[y][x].color });
+      const pixel = layer.pixels[y][x];
+      if (pixel && pixel.a > 0) {
+        layerPixels.push({ x, y, color: pixel });
       }
     }
   }
 
-  if (layerPixels.length === 0) return { pixels, layers };
+  if (layerPixels.length === 0) {
+    return { layers: layers.map(l => ({ ...l, pixels: cloneLayerPixels(l.pixels) })) };
+  }
 
   // Use Union-Find to create sub-layers based on color similarity and adjacency
   const uf = new UnionFind(layerPixels.length);
@@ -766,7 +795,9 @@ export function splitLayerByColor(
   }
 
   // If only one component, no split needed
-  if (components.size <= 1) return { pixels, layers };
+  if (components.size <= 1) {
+    return { layers: layers.map(l => ({ ...l, pixels: cloneLayerPixels(l.pixels) })) };
+  }
 
   // Calculate noise settings
   const noiseSettings = applyNoiseFromThreshold
@@ -774,8 +805,9 @@ export function splitLayerByColor(
     : { brightness: 0, hue: 0 };
 
   // Create new layers for each component
-  const newLayers = layers.filter(l => l.id !== layerId);
-  const newPixels = pixels.map(row => row.map(p => ({ ...p, color: { ...p.color } })));
+  const newLayers: Layer[] = layers
+    .filter(l => l.id !== layerId)
+    .map(l => ({ ...l, pixels: cloneLayerPixels(l.pixels) }));
 
   let subIndex = 1;
   for (const [, componentPixels] of components) {
@@ -793,9 +825,14 @@ export function splitLayerByColor(
       a: 255,
     };
 
-    const newLayerId = generateId();
+    // Create pixel data for this component
+    const componentPixelData = createEmptyLayerPixels();
+    for (const p of componentPixels) {
+      componentPixelData[p.y][p.x] = { ...p.color };
+    }
+
     const newLayer: Layer = {
-      id: newLayerId,
+      id: generateId(),
       name: `${layer.name}-${subIndex}`,
       baseColor: avgColor,
       noiseSettings: { ...noiseSettings },
@@ -803,53 +840,55 @@ export function splitLayerByColor(
       order: newLayers.length,
       layerType: layer.layerType,
       visible: true,
+      opacity: layer.opacity ?? 100,
+      pixels: componentPixelData,
     };
     newLayers.push(newLayer);
-
-    // Update pixels
-    for (const p of componentPixels) {
-      newPixels[p.y][p.x] = {
-        layerId: newLayerId,
-        color: { ...avgColor },
-      };
-    }
 
     subIndex++;
   }
 
-  return { pixels: newPixels, layers: newLayers };
+  return { layers: newLayers };
 }
 
-// Split selected pixels from a layer into a new layer
+/**
+ * Split selected pixels from a layer into a new layer.
+ */
 export function splitLayerBySelection(
-  pixels: PixelData[][],
   layers: Layer[],
   layerId: string,
   selectedPixels: { x: number; y: number }[]
-): { pixels: PixelData[][]; layers: Layer[]; newLayerId: string | null } {
+): { layers: Layer[]; newLayerId: string | null } {
   const layer = layers.find(l => l.id === layerId);
   if (!layer || selectedPixels.length === 0) {
-    return { pixels, layers, newLayerId: null };
+    return {
+      layers: layers.map(l => ({ ...l, pixels: cloneLayerPixels(l.pixels) })),
+      newLayerId: null,
+    };
   }
 
-  // Filter to only include pixels that actually belong to this layer
+  // Filter to only include pixels that actually have data in this layer
   const validPixels = selectedPixels.filter(p =>
     p.x >= 0 && p.x < SKIN_WIDTH &&
     p.y >= 0 && p.y < SKIN_HEIGHT &&
-    pixels[p.y][p.x].layerId === layerId
+    layer.pixels[p.y][p.x] !== null &&
+    layer.pixels[p.y][p.x]!.a > 0
   );
 
   if (validPixels.length === 0) {
-    return { pixels, layers, newLayerId: null };
+    return {
+      layers: layers.map(l => ({ ...l, pixels: cloneLayerPixels(l.pixels) })),
+      newLayerId: null,
+    };
   }
 
   // Calculate average color of selected pixels
   let totalR = 0, totalG = 0, totalB = 0;
   for (const p of validPixels) {
-    const color = pixels[p.y][p.x].color;
-    totalR += color.r;
-    totalG += color.g;
-    totalB += color.b;
+    const pixel = layer.pixels[p.y][p.x]!;
+    totalR += pixel.r;
+    totalG += pixel.g;
+    totalB += pixel.b;
   }
   const avgColor: RGBA = {
     r: Math.round(totalR / validPixels.length),
@@ -858,7 +897,12 @@ export function splitLayerBySelection(
     a: 255,
   };
 
-  // Create new layer
+  // Create new layer with the selected pixels
+  const newLayerPixels = createEmptyLayerPixels();
+  for (const p of validPixels) {
+    newLayerPixels[p.y][p.x] = { ...layer.pixels[p.y][p.x]! };
+  }
+
   const newLayerId = generateId();
   const maxOrder = layers.length > 0 ? Math.max(...layers.map(l => l.order)) : -1;
   const newLayer: Layer = {
@@ -870,104 +914,148 @@ export function splitLayerBySelection(
     order: maxOrder + 1,
     layerType: layer.layerType,
     visible: true,
+    opacity: layer.opacity ?? 100,
+    pixels: newLayerPixels,
   };
 
-  const newLayers = [...layers, newLayer];
-
-  // Update pixels
-  const newPixels = pixels.map(row => row.map(p => ({ ...p, color: { ...p.color } })));
-  for (const p of validPixels) {
-    newPixels[p.y][p.x] = {
-      layerId: newLayerId,
-      color: { ...avgColor },
-    };
+  // Create new layers array, removing selected pixels from source layer
+  const newLayers: Layer[] = [];
+  for (const l of layers) {
+    if (l.id === layerId) {
+      // Clone source layer and remove selected pixels
+      const clonedPixels = cloneLayerPixels(l.pixels);
+      for (const p of validPixels) {
+        clonedPixels[p.y][p.x] = null;
+      }
+      newLayers.push({ ...l, pixels: clonedPixels });
+    } else {
+      newLayers.push({ ...l, pixels: cloneLayerPixels(l.pixels) });
+    }
   }
+  newLayers.push(newLayer);
 
-  return { pixels: newPixels, layers: newLayers, newLayerId };
+  return { layers: newLayers, newLayerId };
 }
 
-// Blend border pixels with adjacent different-layer pixels
-// This creates a smooth transition at layer boundaries
-// If targetLayerId is provided, only blend pixels in that layer
+/**
+ * Blend border pixels with adjacent different-layer pixels.
+ * This creates a smooth transition at layer boundaries.
+ * If targetLayerId is provided, only blend pixels in that layer.
+ */
 export function blendBorderPixels(
-  pixels: PixelData[][],
+  layers: Layer[],
   blendStrength: number = 15, // percentage of blend (0-100)
   targetLayerId?: string // optional: only blend this specific layer
-): { pixels: PixelData[][] } {
-  const newPixels = pixels.map(row => row.map(p => ({ ...p, color: { ...p.color } })));
-
-  // For each pixel, check if it's on a boundary (adjacent to a different layer)
+): { layers: Layer[] } {
+  // Build a composite map to know which layer each pixel belongs to
+  // (for finding adjacent pixels from different layers)
+  const pixelLayerMap: (string | null)[][] = [];
   for (let y = 0; y < SKIN_HEIGHT; y++) {
+    pixelLayerMap[y] = [];
     for (let x = 0; x < SKIN_WIDTH; x++) {
-      const pixel = pixels[y][x];
-      if (!pixel.layerId || pixel.color.a === 0) continue;
+      pixelLayerMap[y][x] = null;
+    }
+  }
 
-      // If targetLayerId is specified, only process pixels in that layer
-      if (targetLayerId && pixel.layerId !== targetLayerId) continue;
+  // Sort layers by order (lower order = front, drawn last = takes priority)
+  const sortedLayers = [...layers].sort((a, b) => a.order - b.order);
 
-      // Get current pixel's skin part
-      const currentPart = getSkinPart(x, y);
-      if (!currentPart) continue;
-
-      // Collect colors of adjacent pixels from different layers
-      const adjacentColors: RGBA[] = [];
-      const neighbors = [
-        { dx: -1, dy: 0 },
-        { dx: 1, dy: 0 },
-        { dx: 0, dy: -1 },
-        { dx: 0, dy: 1 },
-      ];
-
-      for (const { dx, dy } of neighbors) {
-        const nx = x + dx;
-        const ny = y + dy;
-
-        if (nx < 0 || nx >= SKIN_WIDTH || ny < 0 || ny >= SKIN_HEIGHT) continue;
-
-        const neighbor = pixels[ny][nx];
-        if (!neighbor.layerId || neighbor.color.a === 0) continue;
-
-        // Check if neighbor is in same body part (to respect UV boundaries)
-        const neighborPart = getSkinPart(nx, ny);
-        if (!neighborPart) continue;
-
-        // Only blend within same body part (not across UV boundaries)
-        const currentBodyPart = getBodyPartName(currentPart, true);
-        const neighborBodyPart = getBodyPartName(neighborPart, true);
-        if (currentBodyPart !== neighborBodyPart) continue;
-
-        // If different layer, add to adjacent colors
-        if (neighbor.layerId !== pixel.layerId) {
-          adjacentColors.push(neighbor.color);
+  // Build pixel ownership map (who owns each pixel based on order priority)
+  for (const layer of sortedLayers.slice().reverse()) {
+    // Iterate in reverse order (higher order first = background)
+    for (let y = 0; y < SKIN_HEIGHT; y++) {
+      for (let x = 0; x < SKIN_WIDTH; x++) {
+        const pixel = layer.pixels[y][x];
+        if (pixel && pixel.a > 0) {
+          pixelLayerMap[y][x] = layer.id;
         }
-      }
-
-      // If this pixel is on a boundary, blend it
-      if (adjacentColors.length > 0) {
-        // Calculate average of adjacent different-layer colors
-        let totalR = 0, totalG = 0, totalB = 0;
-        for (const c of adjacentColors) {
-          totalR += c.r;
-          totalG += c.g;
-          totalB += c.b;
-        }
-        const avgR = totalR / adjacentColors.length;
-        const avgG = totalG / adjacentColors.length;
-        const avgB = totalB / adjacentColors.length;
-
-        // Blend current color towards adjacent average
-        const factor = blendStrength / 100;
-        newPixels[y][x].color = {
-          r: Math.round(pixel.color.r + (avgR - pixel.color.r) * factor),
-          g: Math.round(pixel.color.g + (avgG - pixel.color.g) * factor),
-          b: Math.round(pixel.color.b + (avgB - pixel.color.b) * factor),
-          a: pixel.color.a,
-        };
       }
     }
   }
 
-  return { pixels: newPixels };
+  // Now blend
+  const newLayers: Layer[] = layers.map(layer => {
+    // If targetLayerId is specified, only process that layer
+    if (targetLayerId && layer.id !== targetLayerId) {
+      return { ...layer, pixels: cloneLayerPixels(layer.pixels) };
+    }
+
+    const newPixels = cloneLayerPixels(layer.pixels);
+
+    for (let y = 0; y < SKIN_HEIGHT; y++) {
+      for (let x = 0; x < SKIN_WIDTH; x++) {
+        const pixel = layer.pixels[y][x];
+        if (!pixel || pixel.a === 0) continue;
+
+        // Get current pixel's skin part
+        const currentPart = getSkinPart(x, y);
+        if (!currentPart) continue;
+
+        // Collect colors of adjacent pixels from different layers
+        const adjacentColors: RGBA[] = [];
+        const neighbors = [
+          { dx: -1, dy: 0 },
+          { dx: 1, dy: 0 },
+          { dx: 0, dy: -1 },
+          { dx: 0, dy: 1 },
+        ];
+
+        for (const { dx, dy } of neighbors) {
+          const nx = x + dx;
+          const ny = y + dy;
+
+          if (nx < 0 || nx >= SKIN_WIDTH || ny < 0 || ny >= SKIN_HEIGHT) continue;
+
+          const neighborLayerId = pixelLayerMap[ny][nx];
+          if (!neighborLayerId || neighborLayerId === layer.id) continue;
+
+          // Check if neighbor is in same body part (to respect UV boundaries)
+          const neighborPart = getSkinPart(nx, ny);
+          if (!neighborPart) continue;
+
+          // Only blend within same body part (not across UV boundaries)
+          const currentBodyPart = getBodyPartName(currentPart, true);
+          const neighborBodyPart = getBodyPartName(neighborPart, true);
+          if (currentBodyPart !== neighborBodyPart) continue;
+
+          // Get the neighbor's color from its layer
+          const neighborLayer = layers.find(l => l.id === neighborLayerId);
+          if (!neighborLayer) continue;
+          const neighborPixel = neighborLayer.pixels[ny][nx];
+          if (!neighborPixel || neighborPixel.a === 0) continue;
+
+          adjacentColors.push(neighborPixel);
+        }
+
+        // If this pixel is on a boundary, blend it
+        if (adjacentColors.length > 0) {
+          // Calculate average of adjacent different-layer colors
+          let totalR = 0, totalG = 0, totalB = 0;
+          for (const c of adjacentColors) {
+            totalR += c.r;
+            totalG += c.g;
+            totalB += c.b;
+          }
+          const avgR = totalR / adjacentColors.length;
+          const avgG = totalG / adjacentColors.length;
+          const avgB = totalB / adjacentColors.length;
+
+          // Blend current color towards adjacent average
+          const factor = blendStrength / 100;
+          newPixels[y][x] = {
+            r: Math.round(pixel.r + (avgR - pixel.r) * factor),
+            g: Math.round(pixel.g + (avgG - pixel.g) * factor),
+            b: Math.round(pixel.b + (avgB - pixel.b) * factor),
+            a: pixel.a,
+          };
+        }
+      }
+    }
+
+    return { ...layer, pixels: newPixels };
+  });
+
+  return { layers: newLayers };
 }
 
 // Export color distance for UI use

@@ -35,7 +35,6 @@ export function Toolbar() {
   const historyIndex = useEditorStore((state) => state.historyIndex);
   const activeLayerId = useEditorStore((state) => state.activeLayerId);
   const layers = useEditorStore((state) => state.layers);
-  const pixels = useEditorStore((state) => state.pixels);
   const drawingColor = useEditorStore((state) => state.drawingColor);
   const setDrawingColor = useEditorStore((state) => state.setDrawingColor);
   const generateLayers = useEditorStore((state) => state.generateLayers);
@@ -48,17 +47,10 @@ export function Toolbar() {
   const activeLayer = activeLayerId ? layers.find(l => l.id === activeLayerId) : null;
   const isDirectMode = activeLayer?.layerType === 'direct' || layers.length === 0;
 
-  // Check if there are ungrouped pixels (pixels with color but no layer) - memoized
-  const hasUngroupedPixels = useMemo(() => {
-    for (const row of pixels) {
-      for (const pixel of row) {
-        if (pixel.color.a > 0 && pixel.layerId === null) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }, [pixels]);
+  // Check if there are any layers with pixels (for auto-generate button)
+  // With the new architecture, we don't have "ungrouped" pixels anymore
+  // The auto-generate feature is now only available when importing images
+  const hasUngroupedPixels = false; // Disabled in new architecture
 
   const handleGenerate = (options: { thresholdValue: number; applyNoise: boolean }) => {
     generateLayers({ thresholdValue: options.thresholdValue, applyNoise: options.applyNoise });

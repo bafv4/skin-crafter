@@ -3,52 +3,23 @@ import { Canvas, useFrame, invalidate } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { useEditorStore } from '../../stores/editorStore';
-import { SKIN_WIDTH, SKIN_HEIGHT, type ModelType, type Layer, type LayerGroup } from '../../types/editor';
+import { SKIN_WIDTH, SKIN_HEIGHT, type ModelType, type RGBA } from '../../types/editor';
 
-// Build a set of hidden layer IDs based on layer and group visibility
-function getHiddenLayerIds(layers: Layer[], layerGroups: LayerGroup[]): Set<string> {
-  const hiddenLayerIds = new Set<string>();
-  const hiddenGroupIds = new Set(
-    layerGroups.filter((g) => !g.visible).map((g) => g.id)
-  );
-
-  for (const layer of layers) {
-    if (!layer.visible || (layer.groupId && hiddenGroupIds.has(layer.groupId))) {
-      hiddenLayerIds.add(layer.id);
-    }
-  }
-
-  return hiddenLayerIds;
-}
-
-// Helper to build texture data from pixels
-function buildTextureData(
-  pixels: ReturnType<typeof useEditorStore.getState>['pixels'],
-  layers: ReturnType<typeof useEditorStore.getState>['layers'],
-  layerGroups: ReturnType<typeof useEditorStore.getState>['layerGroups']
-): Uint8Array {
-  const hiddenLayerIds = getHiddenLayerIds(layers, layerGroups);
+// Helper to build texture data from composite
+function buildTextureData(composite: RGBA[][]): Uint8Array {
   const data = new Uint8Array(SKIN_WIDTH * SKIN_HEIGHT * 4);
 
   for (let y = 0; y < SKIN_HEIGHT; y++) {
     for (let x = 0; x < SKIN_WIDTH; x++) {
       // Flip Y for texture coordinates
       const srcY = SKIN_HEIGHT - 1 - y;
-      const pixel = pixels[srcY][x];
+      const pixel = composite[srcY][x];
       const i = (y * SKIN_WIDTH + x) * 4;
 
-      // Skip pixels from hidden layers
-      if (pixel.layerId && hiddenLayerIds.has(pixel.layerId)) {
-        data[i] = 0;
-        data[i + 1] = 0;
-        data[i + 2] = 0;
-        data[i + 3] = 0;
-      } else {
-        data[i] = pixel.color.r;
-        data[i + 1] = pixel.color.g;
-        data[i + 2] = pixel.color.b;
-        data[i + 3] = pixel.color.a;
-      }
+      data[i] = pixel.r;
+      data[i + 1] = pixel.g;
+      data[i + 2] = pixel.b;
+      data[i + 3] = pixel.a;
     }
   }
 
@@ -64,7 +35,8 @@ function useSkinTexture() {
   // Create new texture whenever previewVersion changes
   const texture = useMemo(() => {
     const state = useEditorStore.getState();
-    const data = buildTextureData(state.pixels, state.layers, state.layerGroups);
+    const composite = state.getComposite();
+    const data = buildTextureData(composite);
 
     const tex = new THREE.DataTexture(
       data,

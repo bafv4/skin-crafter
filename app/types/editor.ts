@@ -22,16 +22,31 @@ export interface NoiseSettings {
   material?: MaterialType; // Material type for noise characteristics
 }
 
+// Layer pixel data type (null = transparent)
+export type LayerPixels = (RGBA | null)[][];
+
 // Color layer
+// Note: Primary pixel data is managed by PixelEngine (Web Worker) for performance.
+// The `pixels` property is kept for:
+// - Undo/redo history (snapshot-based)
+// - Serialization (import/export)
+// - Backwards compatibility during migration
 export interface Layer {
   id: string;
   name: string;
   baseColor: RGBA;
   noiseSettings: NoiseSettings;
   groupId: string | null; // null = ungrouped
-  order: number; // for sorting within group or at root level
+  order: number; // for sorting - lower order = front (higher priority)
   layerType: LayerType; // 'direct' = draw with any color, 'singleColor' = use baseColor
   visible: boolean; // whether the layer is visible in canvas/preview
+  opacity: number; // 0-100, layer opacity percentage
+  pixels: LayerPixels; // 64x64 pixel data - synced with PixelEngine
+}
+
+// Layer with pixel data in Uint8ClampedArray format (for PixelEngine transfer)
+export interface LayerWithPixelData extends Layer {
+  pixelData: Uint8ClampedArray;
 }
 
 // Layer group (for organizing layers)
@@ -65,12 +80,13 @@ export interface PaletteColor {
   name?: string;
 }
 
-// Pixel change for diff-based history
+// Pixel change for diff-based history (per-layer)
 export interface PixelChange {
+  layerId: string; // which layer was modified
   x: number;
   y: number;
-  oldPixel: PixelData;
-  newPixel: PixelData;
+  oldPixel: RGBA | null;
+  newPixel: RGBA | null;
 }
 
 // Layer change for diff-based history
@@ -293,6 +309,26 @@ export function getSkinParts(modelType: ModelType): SkinRegion[] {
 }
 
 // Helper functions
+
+// Create empty layer pixels (64x64 grid of null)
+export function createEmptyLayerPixels(): LayerPixels {
+  const pixels: LayerPixels = [];
+  for (let y = 0; y < SKIN_HEIGHT; y++) {
+    pixels[y] = [];
+    for (let x = 0; x < SKIN_WIDTH; x++) {
+      pixels[y][x] = null;
+    }
+  }
+  return pixels;
+}
+
+// Clone layer pixels (deep copy)
+export function cloneLayerPixels(pixels: LayerPixels): LayerPixels {
+  return pixels.map(row => row.map(p => p ? { ...p } : null));
+}
+
+// DEPRECATED: Use createEmptyLayerPixels instead
+// Kept for backward compatibility during migration
 export function createEmptyPixels(): PixelData[][] {
   const pixels: PixelData[][] = [];
   for (let y = 0; y < SKIN_HEIGHT; y++) {

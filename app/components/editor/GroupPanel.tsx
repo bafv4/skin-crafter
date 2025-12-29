@@ -483,6 +483,7 @@ function LayerDetailDialog({
   const updateLayerType = useEditorStore((state) => state.updateLayerType);
   const updateLayerColor = useEditorStore((state) => state.updateLayerColor);
   const updateLayerName = useEditorStore((state) => state.updateLayerName);
+  const updateLayerOpacity = useEditorStore((state) => state.updateLayerOpacity);
 
   // Layer name editing
   const [editName, setEditName] = useState(layer?.name ?? '');
@@ -598,6 +599,21 @@ function LayerDetailDialog({
               </div>
             </div>
           )}
+
+          {/* Opacity */}
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <Label>不透明度</Label>
+              <span className="text-sm text-muted-foreground">{layer.opacity ?? 100}%</span>
+            </div>
+            <Slider
+              value={[layer.opacity ?? 100]}
+              onValueChange={([v]) => updateLayerOpacity(layerId, v)}
+              min={0}
+              max={100}
+              step={1}
+            />
+          </div>
 
           {/* Noise Section */}
           <div className={`flex flex-col gap-3 border-t pt-4 ${isDirectMode ? 'opacity-50' : ''}`}>

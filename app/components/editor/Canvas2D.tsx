@@ -1,11 +1,11 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { useEditorStore } from '../../stores/editorStore';
-import { SKIN_WIDTH, SKIN_HEIGHT, getSkinParts, type SkinRegion } from '../../types/editor';
+import { SKIN_WIDTH, SKIN_HEIGHT, getSkinParts, type SkinRegion, type RGBA } from '../../types/editor';
 import {
   renderSkinToCanvas,
   drawGrid,
   drawCheckerboard,
-  drawGroupHighlight,
+  drawLayerHighlight,
   getPixelFromMouse,
 } from '@lib/skinRenderer';
 import { Button } from '@components/ui/button';
@@ -37,9 +37,10 @@ export function Canvas2D() {
   const [rectEnd, setRectEnd] = useState<{ x: number; y: number } | null>(null);
   const [hoveredRegion, setHoveredRegion] = useState<SkinRegion | null>(null);
   const [showOverlay, setShowOverlay] = useState(true);
+  // Counter to force re-render during drawing (incremented on each pixel draw)
+  const [drawingTick, setDrawingTick] = useState(0);
 
   // Use individual selectors to minimize re-renders
-  const pixels = useEditorStore((state) => state.pixels);
   const activeTool = useEditorStore((state) => state.activeTool);
   const activeLayerId = useEditorStore((state) => state.activeLayerId);
   const highlightedLayerId = useEditorStore((state) => state.highlightedLayerId);
@@ -47,9 +48,13 @@ export function Canvas2D() {
   const setPixelRect = useEditorStore((state) => state.setPixelRect);
   const setDrawingColor = useEditorStore((state) => state.setDrawingColor);
   const commitDrawing = useEditorStore((state) => state.commitDrawing);
-  const layers = useEditorStore((state) => state.layers);
-  const layerGroups = useEditorStore((state) => state.layerGroups);
   const modelType = useEditorStore((state) => state.modelType);
+  const getComposite = useEditorStore((state) => state.getComposite);
+  const drawingColor = useEditorStore((state) => state.drawingColor);
+  const previewVersion = useEditorStore((state) => state.previewVersion);
+
+  // Only get layers when needed for highlight or active layer info (not for rendering)
+  const layers = useEditorStore((state) => state.layers);
 
   // Get skin parts for current model type
   const skinParts = getSkinParts(modelType);
@@ -79,8 +84,9 @@ export function Canvas2D() {
       // Draw checkerboard background (transparency indicator)
       drawCheckerboard(ctx, canvas.width, canvas.height, scale, 2);
 
-      // Draw skin pixels (respecting layer visibility)
-      renderSkinToCanvas(ctx, pixels, scale, layers, layerGroups);
+      // Get the composite and draw it
+      const composite = getComposite();
+      renderSkinToCanvas(ctx, composite, scale);
 
       // Draw grid
       drawGrid(ctx, scale);
@@ -119,7 +125,8 @@ export function Canvas2D() {
         cancelAnimationFrame(rafIdRef.current);
       }
     };
-  }, [pixels, scale, rectStart, rectEnd, activeTool, layers, layerGroups]);
+    // drawingTick triggers re-render during drawing for real-time feedback
+  }, [previewVersion, scale, rectStart, rectEnd, activeTool, getComposite, drawingTick]);
 
   // Draw layer highlight on separate canvas (lightweight, only redraws on highlight change)
   useEffect(() => {
@@ -135,9 +142,12 @@ export function Canvas2D() {
     ctx.clearRect(0, 0, highlightCanvas.width, highlightCanvas.height);
 
     if (highlightedLayerId) {
-      drawGroupHighlight(ctx, pixels, highlightedLayerId, scale);
+      const highlightedLayer = layers.find(l => l.id === highlightedLayerId);
+      if (highlightedLayer) {
+        drawLayerHighlight(ctx, highlightedLayer, scale);
+      }
     }
-  }, [highlightedLayerId, scale, pixels]);
+  }, [highlightedLayerId, scale, layers]);
 
   // Draw overlay with skin part labels
   useEffect(() => {
@@ -187,6 +197,18 @@ export function Canvas2D() {
     return null;
   }, [skinParts]);
 
+  // Get the color to use for drawing
+  const getDrawColor = useCallback((): RGBA => {
+    // Get the active layer to check its type
+    const activeLayer = layers.find(l => l.id === activeLayerId);
+    if (activeLayer && activeLayer.layerType === 'singleColor') {
+      // For singleColor layers, use the layer's baseColor
+      return activeLayer.baseColor;
+    }
+    // For direct layers or no active layer, use the drawing color
+    return drawingColor;
+  }, [activeLayerId, layers, drawingColor]);
+
   // Handle mouse events
   const handleMouseDown = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -211,10 +233,11 @@ export function Canvas2D() {
       if (!pos) return;
 
       if (activeTool === 'eyedropper') {
-        // Pick color from pixel
-        const pixel = pixels[pos.y][pos.x];
-        if (pixel.color.a > 0) {
-          setDrawingColor(pixel.color);
+        // Pick color from composite
+        const composite = getComposite();
+        const pixel = composite[pos.y][pos.x];
+        if (pixel.a > 0) {
+          setDrawingColor(pixel);
         }
         return;
       }
@@ -230,12 +253,15 @@ export function Canvas2D() {
       setIsDrawing(true);
       if (activeTool === 'eraser') {
         setPixel(pos.x, pos.y, null);
-      } else if (activeLayerId || layers.length === 0) {
-        // Draw with active layer, or directly if no layers exist
-        setPixel(pos.x, pos.y, activeLayerId ?? 'direct');
+      } else {
+        // Draw with the appropriate color
+        const color = getDrawColor();
+        setPixel(pos.x, pos.y, color);
       }
+      // Trigger immediate re-render for drawing feedback
+      setDrawingTick(t => t + 1);
     },
-    [activeTool, activeLayerId, layers.length, pixels, scale, setPixel, setDrawingColor, panOffset]
+    [activeTool, scale, setPixel, setDrawingColor, panOffset, getComposite, getDrawColor]
   );
 
   const handleMouseMove = useCallback(
@@ -273,12 +299,15 @@ export function Canvas2D() {
       // Pencil or eraser
       if (activeTool === 'eraser') {
         setPixel(pos.x, pos.y, null);
-      } else if (activeLayerId || layers.length === 0) {
-        // Draw with active layer, or directly if no layers exist
-        setPixel(pos.x, pos.y, activeLayerId ?? 'direct');
+      } else {
+        // Draw with the appropriate color
+        const color = getDrawColor();
+        setPixel(pos.x, pos.y, color);
       }
+      // Trigger immediate re-render for drawing feedback
+      setDrawingTick(t => t + 1);
     },
-    [isDrawing, isPanning, activeTool, activeLayerId, layers.length, scale, setPixel, panStart, getSkinRegionAt]
+    [isDrawing, isPanning, activeTool, scale, setPixel, panStart, getSkinRegionAt, getDrawColor]
   );
 
   const handleMouseUp = useCallback(() => {
@@ -288,12 +317,13 @@ export function Canvas2D() {
     }
 
     if (activeTool === 'rectangle' && rectStart && rectEnd) {
+      const color = getDrawColor();
       setPixelRect(
         rectStart.x,
         rectStart.y,
         rectEnd.x,
         rectEnd.y,
-        activeLayerId ?? (layers.length === 0 ? 'direct' : null)
+        color
       );
       // setPixelRect already increments previewVersion
     } else if (isDrawing) {
@@ -304,7 +334,7 @@ export function Canvas2D() {
     setIsDrawing(false);
     setRectStart(null);
     setRectEnd(null);
-  }, [isPanning, activeTool, rectStart, rectEnd, activeLayerId, layers.length, setPixelRect, isDrawing, commitDrawing]);
+  }, [isPanning, activeTool, rectStart, rectEnd, setPixelRect, isDrawing, commitDrawing, getDrawColor]);
 
   // Handle wheel zoom
   const handleWheel = useCallback((e: React.WheelEvent) => {
