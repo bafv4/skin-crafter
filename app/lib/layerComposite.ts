@@ -1,8 +1,5 @@
 import { type Layer, type LayerGroup, type RGBA, SKIN_WIDTH, SKIN_HEIGHT } from '../types/editor';
 
-// Preallocated transparent pixel for reuse
-const TRANSPARENT: RGBA = { r: 0, g: 0, b: 0, a: 0 };
-
 // Create empty composite (64x64 transparent) - optimized with preallocated arrays
 export function createEmptyComposite(): RGBA[][] {
   const result: RGBA[][] = new Array(SKIN_HEIGHT);
@@ -68,11 +65,11 @@ const tempPixel: RGBA = { r: 0, g: 0, b: 0, a: 0 };
 /**
  * Compute the composite (flattened) image from all layers.
  *
- * Layers are sorted by order:
- * - Higher order = background (drawn first)
- * - Lower order = foreground (drawn last, takes priority)
+ * Layers are sorted by:
+ * 1. Group order (if in a group) - higher order = background
+ * 2. Layer order within group (or globally if ungrouped) - higher order = background
  *
- * This means order 0 will be on top of order 1, etc.
+ * This means lower order values appear on top (foreground).
  */
 export function computeLayerComposite(
   layers: Layer[],
@@ -84,6 +81,12 @@ export function computeLayerComposite(
   if (layers.length === 0) return result;
 
   const hiddenLayerIds = getHiddenLayerIds(layers, layerGroups);
+
+  // Build group order map for fast lookup
+  const groupOrderMap = new Map<string, number>();
+  for (const group of layerGroups) {
+    groupOrderMap.set(group.id, group.order);
+  }
 
   // Filter and sort layers - only visible ones
   const visibleLayers: Layer[] = [];
@@ -97,8 +100,21 @@ export function computeLayerComposite(
   // Fast path: no visible layers
   if (visibleLayers.length === 0) return result;
 
-  // Sort by order descending (higher order = draw first = background)
-  visibleLayers.sort((a, b) => b.order - a.order);
+  // Sort by group order first, then by layer order within group
+  // Higher order = draw first = background
+  visibleLayers.sort((a, b) => {
+    // Get effective group order (use Infinity for ungrouped layers so they sort to back initially)
+    const aGroupOrder = a.groupId ? (groupOrderMap.get(a.groupId) ?? Infinity) : Infinity;
+    const bGroupOrder = b.groupId ? (groupOrderMap.get(b.groupId) ?? Infinity) : Infinity;
+
+    // First compare by group order (higher = background)
+    if (aGroupOrder !== bGroupOrder) {
+      return bGroupOrder - aGroupOrder;
+    }
+
+    // Within the same group (or both ungrouped), compare by layer order
+    return b.order - a.order;
+  });
 
   // Composite from back to front
   for (let li = 0; li < visibleLayers.length; li++) {

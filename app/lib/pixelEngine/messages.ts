@@ -16,7 +16,7 @@ export type WorkerCommand =
   | { type: 'SET_LAYER_VISIBILITY'; layerId: string; visible: boolean }
   | { type: 'SET_LAYER_OPACITY'; layerId: string; opacity: number }
   | { type: 'SET_LAYER_ORDER'; layerId: string; order: number }
-  | { type: 'REQUEST_COMPOSITE'; visibleLayerIds: string[]; layerOpacities: Record<string, number>; layerOrders: Record<string, number> }
+  | { type: 'REQUEST_COMPOSITE'; visibleLayerIds: string[]; layerOpacities: Record<string, number>; layerOrders: Record<string, number>; layerGroupIds: Record<string, string | null>; groupOrders: Record<string, number> }
   | { type: 'GET_LAYER_DATA'; layerId: string }
   | { type: 'GET_ALL_LAYERS_DATA' }
   | { type: 'SET_LAYER_DATA'; layerId: string; order: number; data: ArrayBuffer }

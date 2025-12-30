@@ -47,18 +47,21 @@ export class Compositor {
 
   /**
    * 指定されたレイヤーIDと設定で合成（Worker用簡易版）
+   * グループのorderを考慮してソート
    */
   compositeFromMap(
     layerMap: Map<string, PixelBuffer>,
     visibleLayerIds: string[],
     layerOpacities: Record<string, number>,
-    layerOrders: Record<string, number>
+    layerOrders: Record<string, number>,
+    layerGroupIds: Record<string, string | null> = {},
+    groupOrders: Record<string, number> = {}
   ): Uint8ClampedArray {
     // 結果バッファをクリア
     this.result.fill(0);
 
     // 可視レイヤーを収集し、orderでソート
-    const layers: Array<{ buffer: PixelBuffer; opacity: number; order: number }> = [];
+    const layers: Array<{ buffer: PixelBuffer; opacity: number; order: number; groupOrder: number }> = [];
 
     for (const layerId of visibleLayerIds) {
       const buffer = layerMap.get(layerId);
@@ -66,14 +69,21 @@ export class Compositor {
 
       const opacity = layerOpacities[layerId] ?? 100;
       const order = layerOrders[layerId] ?? 0;
+      const groupId = layerGroupIds[layerId];
+      const groupOrder = groupId ? (groupOrders[groupId] ?? Infinity) : Infinity;
 
       if (opacity > 0) {
-        layers.push({ buffer, opacity, order });
+        layers.push({ buffer, opacity, order, groupOrder });
       }
     }
 
-    // orderでソート（大きい→小さい = 背面→前面）
-    layers.sort((a, b) => b.order - a.order);
+    // グループorderでソート、次にレイヤーorderでソート（大きい→小さい = 背面→前面）
+    layers.sort((a, b) => {
+      if (a.groupOrder !== b.groupOrder) {
+        return b.groupOrder - a.groupOrder;
+      }
+      return b.order - a.order;
+    });
 
     // 背面から前面へ順にブレンド
     for (const layer of layers) {

@@ -185,12 +185,16 @@ export class PixelEngine {
    * @param visibleLayerIds 可視レイヤーのID配列
    * @param layerOpacities レイヤーIDと不透明度のマップ
    * @param layerOrders レイヤーIDと順序のマップ
+   * @param layerGroupIds レイヤーIDとグループIDのマップ
+   * @param groupOrders グループIDと順序のマップ
    * @param callback 合成完了時のコールバック
    */
   requestComposite(
     visibleLayerIds: string[],
     layerOpacities: Record<string, number>,
     layerOrders: Record<string, number>,
+    layerGroupIds: Record<string, string | null>,
+    groupOrders: Record<string, number>,
     callback: CompositeCallback
   ): void {
     this.compositeCallback = callback;
@@ -198,7 +202,9 @@ export class PixelEngine {
       type: 'REQUEST_COMPOSITE',
       visibleLayerIds,
       layerOpacities,
-      layerOrders
+      layerOrders,
+      layerGroupIds,
+      groupOrders
     });
   }
 

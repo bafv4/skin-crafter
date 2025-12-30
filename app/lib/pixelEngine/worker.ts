@@ -114,7 +114,9 @@ self.onmessage = (e: MessageEvent<WorkerCommand>) => {
           layers,
           cmd.visibleLayerIds,
           cmd.layerOpacities,
-          cmd.layerOrders
+          cmd.layerOrders,
+          cmd.layerGroupIds,
+          cmd.groupOrders
         );
 
         // バッファをコピーしてtransfer（元のバッファは維持）
