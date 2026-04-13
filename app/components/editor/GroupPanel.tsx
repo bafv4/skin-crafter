@@ -1,5 +1,6 @@
 import { useState, memo, useCallback, useMemo, useEffect } from 'react';
 import { useShallow } from 'zustand/react/shallow';
+import { useStoreWithEqualityFn } from 'zustand/traditional';
 import { Plus, Trash2, Wand2, Merge, GitMerge, RefreshCw, GripVertical, ChevronRight, ChevronDown, FolderPlus, Palette, PaintBucket, Settings2, Eye, EyeOff, Copy, MoreHorizontal } from 'lucide-react';
 import { Button } from '@components/ui/button';
 import { Input } from '@components/ui/input';
@@ -1148,8 +1149,43 @@ const LayerGroupItem = memo(function LayerGroupItem({
 
 export function LayerPanel({ width }: { width?: number }) {
   // Use individual selectors to minimize re-renders
-  const layers = useEditorStore((state) => state.layers);
-  const layerGroups = useEditorStore((state) => state.layerGroups);
+  // Custom equality: only re-render when layer metadata changes (not pixel data)
+  const layers = useStoreWithEqualityFn(
+    useEditorStore,
+    (state) => state.layers,
+    (a, b) => {
+      if (a.length !== b.length) return false;
+      for (let i = 0; i < a.length; i++) {
+        const la = a[i], lb = b[i];
+        if (la.id !== lb.id || la.name !== lb.name || la.order !== lb.order ||
+            la.visible !== lb.visible || la.opacity !== lb.opacity ||
+            la.groupId !== lb.groupId || la.layerType !== lb.layerType ||
+            la.baseColor.r !== lb.baseColor.r || la.baseColor.g !== lb.baseColor.g ||
+            la.baseColor.b !== lb.baseColor.b || la.baseColor.a !== lb.baseColor.a ||
+            la.noiseSettings.brightness !== lb.noiseSettings.brightness ||
+            la.noiseSettings.hue !== lb.noiseSettings.hue ||
+            la.noiseSettings.material !== lb.noiseSettings.material) {
+          return false;
+        }
+      }
+      return true;
+    }
+  );
+  const layerGroups = useStoreWithEqualityFn(
+    useEditorStore,
+    (state) => state.layerGroups,
+    (a, b) => {
+      if (a.length !== b.length) return false;
+      for (let i = 0; i < a.length; i++) {
+        const ga = a[i], gb = b[i];
+        if (ga.id !== gb.id || ga.name !== gb.name || ga.collapsed !== gb.collapsed ||
+            ga.order !== gb.order || ga.visible !== gb.visible) {
+          return false;
+        }
+      }
+      return true;
+    }
+  );
   const activeLayerId = useEditorStore((state) => state.activeLayerId);
   const createLayer = useEditorStore((state) => state.createLayer);
   const createLayerGroup = useEditorStore((state) => state.createLayerGroup);

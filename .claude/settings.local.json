@@ -9,7 +9,14 @@
       "Bash(pnpm run typecheck:*)",
       "Bash(npm run typecheck:*)",
       "Bash(export PATH=\"/home/bafv4/.nvm/versions/node/v25.2.1/bin:$PATH\")",
-      "Bash(mkdir:*)"
+      "Bash(mkdir:*)",
+      "Bash(pnpm typecheck:*)",
+      "Bash(ls node_modules/zustand/traditional.d.ts)",
+      "Bash(ls node_modules/zustand/traditional.d.mts)",
+      "Bash(ls node_modules/zustand/traditional/)",
+      "Bash(cat)",
+      "Read(//tmp/**)",
+      "Bash(grep -E \"^\\(idb|localforage\\)$\")"
     ]
   }
 }

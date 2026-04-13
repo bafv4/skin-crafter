@@ -27,13 +27,14 @@ function buildTextureData(composite: RGBA[][]): Uint8Array {
 }
 
 // Create texture from pixel data
-// Recreates texture when previewVersion changes
+// Updates texture data in-place when previewVersion changes to avoid GPU memory leaks
 function useSkinTexture() {
   // Subscribe to previewVersion to control when texture updates
   const previewVersion = useEditorStore((state) => state.previewVersion);
 
-  // Create new texture whenever previewVersion changes
-  const texture = useMemo(() => {
+  // Single texture instance, lazily initialized
+  const textureRef = useRef<THREE.DataTexture | null>(null);
+  if (!textureRef.current) {
     const state = useEditorStore.getState();
     const composite = state.getComposite();
     const data = buildTextureData(composite);
@@ -53,11 +54,26 @@ function useSkinTexture() {
     // The pixel data is already in sRGB, and we want to display it without any transformation
     tex.colorSpace = THREE.NoColorSpace;
     tex.needsUpdate = true;
+    textureRef.current = tex;
+  }
 
-    return tex;
+  // Update texture data in-place when previewVersion changes
+  useEffect(() => {
+    const tex = textureRef.current!;
+    const state = useEditorStore.getState();
+    const composite = state.getComposite();
+    const newData = buildTextureData(composite);
+    (tex.image.data as Uint8Array).set(newData);
+    tex.needsUpdate = true;
+    invalidate();
   }, [previewVersion]);
 
-  return texture;
+  // Dispose texture on unmount only
+  useEffect(() => {
+    return () => { textureRef.current?.dispose(); };
+  }, []);
+
+  return textureRef.current;
 }
 
 // UV mapping for Minecraft skin parts
@@ -179,6 +195,14 @@ function BodyPart({
       layer2UvMap
     );
   }, [size, layer2UvMap]);
+
+  // GPU memory: dispose old geometries when deps change or component unmounts
+  useEffect(() => {
+    return () => {
+      geometry.dispose();
+      layer2Geometry?.dispose();
+    };
+  }, [geometry, layer2Geometry]);
 
   return (
     <group position={position}>
@@ -494,7 +518,6 @@ export function Preview3DCanvas({
   return (
     <Canvas
       camera={{ position: [3 / zoom, 2 / zoom, 3 / zoom], fov: 45 }}
-      key={resetKey}
       frameloop="demand"
     >
       <RenderController autoRotate={autoRotate} />

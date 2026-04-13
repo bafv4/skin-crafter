@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist, createJSONStorage, type StateStorage } from 'zustand/middleware';
 import {
   type Layer,
   type LayerGroup,
@@ -198,6 +199,16 @@ function cloneLayers(layers: Layer[]): Layer[] {
   return layers.map(cloneLayer);
 }
 
+// Clone layer metadata only (no pixel data) — for history entries where pixels are tracked separately
+function cloneLayerMetadata(layer: Layer): Layer {
+  return {
+    ...layer,
+    baseColor: { ...layer.baseColor },
+    noiseSettings: { ...layer.noiseSettings },
+    pixels: [],
+  };
+}
+
 // Helper to deep clone layer groups
 function cloneLayerGroups(groups: LayerGroup[]): LayerGroup[] {
   return groups.map((group) => ({ ...group }));
@@ -272,7 +283,7 @@ function calculateDiff(
       oldLayer.visible !== newLayer.visible ||
       oldLayer.opacity !== newLayer.opacity
     ) {
-      layerChanges.push({ type: 'update', layerId: oldLayer.id, oldLayer: cloneLayer(oldLayer), newLayer: cloneLayer(newLayer) });
+      layerChanges.push({ type: 'update', layerId: oldLayer.id, oldLayer: cloneLayerMetadata(oldLayer), newLayer: cloneLayerMetadata(newLayer) });
     }
   }
 
@@ -570,7 +581,64 @@ function ensureActiveLayer(state: EditorState, set: (partial: Partial<EditorStat
   return id;
 }
 
-export const useEditorStore = create<EditorState>((set, get) => ({
+// IndexedDB storage adapter for Zustand persist
+const idbStorage: StateStorage = {
+  getItem: async (name: string): Promise<string | null> => {
+    const db = await openIDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('store', 'readonly');
+      const req = tx.objectStore('store').get(name);
+      req.onsuccess = () => resolve(req.result ?? null);
+      req.onerror = () => reject(req.error);
+    });
+  },
+  setItem: async (name: string, value: string): Promise<void> => {
+    const db = await openIDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('store', 'readwrite');
+      tx.objectStore('store').put(value, name);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  },
+  removeItem: async (name: string): Promise<void> => {
+    const db = await openIDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('store', 'readwrite');
+      tx.objectStore('store').delete(name);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  },
+};
+
+function openIDB(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('skin-crafter', 1);
+    req.onupgradeneeded = () => {
+      req.result.createObjectStore('store');
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+// PixelEngine sync after hydration
+function syncLayersToEngine(layers: Layer[]) {
+  const engine = getPixelEngine();
+  engine.clearAllLayers();
+  for (const layer of layers) {
+    engine.createLayer(layer.id, layer.order);
+    engine.setLayerData(layer.id, layer.order, layerPixelsToUint8(layer.pixels));
+  }
+}
+
+// Persisted state subset (no actions, no transient state)
+type PersistedState = Pick<EditorState, 'layers' | 'layerGroups' | 'palette' | 'modelType' | 'showLayer2' | 'preservePixels'>;
+
+export const useEditorStore = create<EditorState>()(
+  persist(
+    (set, get) => ({
   // Initial state
   layers: [],
   layerGroups: [],
@@ -660,7 +728,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const newLayers = updatedState.layers.slice();
     newLayers[layerIndex] = { ...layer };
 
-    set({ layers: newLayers, compositeCache: null });
+    set({ layers: newLayers });
   },
 
   setPixelRect: (x1, y1, x2, y2, color) => {
@@ -722,7 +790,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   commitDrawing: () => {
     const { saveToHistory } = get();
     saveToHistory();
-    set((state) => ({ previewVersion: state.previewVersion + 1 }));
+    set((state) => ({ compositeCache: null, previewVersion: state.previewVersion + 1 }));
   },
 
   setActiveTool: (tool) => set({ activeTool: tool }),
@@ -1509,4 +1577,23 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   clearPalette: () => {
     set({ palette: [] });
   },
-}));
+}),
+    {
+      name: 'skin-crafter-project',
+      storage: createJSONStorage(() => idbStorage),
+      partialize: (state): PersistedState => ({
+        layers: state.layers,
+        layerGroups: state.layerGroups,
+        palette: state.palette,
+        modelType: state.modelType,
+        showLayer2: state.showLayer2,
+        preservePixels: state.preservePixels,
+      }),
+      onRehydrateStorage: () => (state) => {
+        if (state?.layers && state.layers.length > 0) {
+          syncLayersToEngine(state.layers);
+        }
+      },
+    },
+  ),
+);

@@ -62,7 +62,7 @@ export interface LayerGroup {
 export type Group = Layer;
 
 // Tool types
-export type ToolType = 'pencil' | 'eraser' | 'rectangle' | 'eyedropper';
+export type ToolType = 'pencil' | 'eraser' | 'rectangle' | 'rectangleEraser' | 'eyedropper';
 
 // Model type
 export type ModelType = 'steve' | 'alex';

@@ -37,8 +37,6 @@ export function Canvas2D() {
   const [rectEnd, setRectEnd] = useState<{ x: number; y: number } | null>(null);
   const [hoveredRegion, setHoveredRegion] = useState<SkinRegion | null>(null);
   const [showOverlay, setShowOverlay] = useState(true);
-  // Counter to force re-render during drawing (incremented on each pixel draw)
-  const [drawingTick, setDrawingTick] = useState(0);
 
   // Use individual selectors to minimize re-renders
   const activeTool = useEditorStore((state) => state.activeTool);
@@ -49,7 +47,6 @@ export function Canvas2D() {
   const setDrawingColor = useEditorStore((state) => state.setDrawingColor);
   const commitDrawing = useEditorStore((state) => state.commitDrawing);
   const modelType = useEditorStore((state) => state.modelType);
-  const getComposite = useEditorStore((state) => state.getComposite);
   const drawingColor = useEditorStore((state) => state.drawingColor);
   const previewVersion = useEditorStore((state) => state.previewVersion);
 
@@ -85,20 +82,21 @@ export function Canvas2D() {
       drawCheckerboard(ctx, canvas.width, canvas.height, scale, 2);
 
       // Get the composite and draw it
-      const composite = getComposite();
+      const composite = useEditorStore.getState().getComposite();
       renderSkinToCanvas(ctx, composite, scale);
 
       // Draw grid
       drawGrid(ctx, scale);
 
       // Draw rectangle preview
-      if (rectStart && rectEnd && activeTool === 'rectangle') {
+      if (rectStart && rectEnd && (activeTool === 'rectangle' || activeTool === 'rectangleEraser')) {
         const minX = Math.min(rectStart.x, rectEnd.x);
         const maxX = Math.max(rectStart.x, rectEnd.x);
         const minY = Math.min(rectStart.y, rectEnd.y);
         const maxY = Math.max(rectStart.y, rectEnd.y);
 
-        ctx.strokeStyle = 'rgba(0, 120, 255, 0.8)';
+        const isErasing = activeTool === 'rectangleEraser';
+        ctx.strokeStyle = isErasing ? 'rgba(255, 60, 60, 0.8)' : 'rgba(0, 120, 255, 0.8)';
         ctx.lineWidth = 2;
         ctx.strokeRect(
           minX * scale,
@@ -107,7 +105,7 @@ export function Canvas2D() {
           (maxY - minY + 1) * scale
         );
 
-        ctx.fillStyle = 'rgba(0, 120, 255, 0.2)';
+        ctx.fillStyle = isErasing ? 'rgba(255, 60, 60, 0.2)' : 'rgba(0, 120, 255, 0.2)';
         ctx.fillRect(
           minX * scale,
           minY * scale,
@@ -125,8 +123,7 @@ export function Canvas2D() {
         cancelAnimationFrame(rafIdRef.current);
       }
     };
-    // drawingTick triggers re-render during drawing for real-time feedback
-  }, [previewVersion, scale, rectStart, rectEnd, activeTool, getComposite, drawingTick]);
+  }, [previewVersion, scale, rectStart, rectEnd, activeTool]);
 
   // Draw layer highlight on separate canvas (lightweight, only redraws on highlight change)
   useEffect(() => {
@@ -209,6 +206,18 @@ export function Canvas2D() {
     return drawingColor;
   }, [activeLayerId, layers, drawingColor]);
 
+  // Paint a single pixel directly on the canvas for immediate feedback (bypasses React re-render)
+  const drawPixelDirect = useCallback((canvas: HTMLCanvasElement, px: number, py: number, color: RGBA | null) => {
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    if (color === null) {
+      ctx.clearRect(px * scale, py * scale, scale, scale);
+    } else {
+      ctx.fillStyle = `rgba(${color.r}, ${color.g}, ${color.b}, ${color.a / 255})`;
+      ctx.fillRect(px * scale, py * scale, scale, scale);
+    }
+  }, [scale]);
+
   // Handle mouse events
   const handleMouseDown = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -234,7 +243,7 @@ export function Canvas2D() {
 
       if (activeTool === 'eyedropper') {
         // Pick color from composite
-        const composite = getComposite();
+        const composite = useEditorStore.getState().getComposite();
         const pixel = composite[pos.y][pos.x];
         if (pixel.a > 0) {
           setDrawingColor(pixel);
@@ -242,7 +251,7 @@ export function Canvas2D() {
         return;
       }
 
-      if (activeTool === 'rectangle') {
+      if (activeTool === 'rectangle' || activeTool === 'rectangleEraser') {
         setRectStart(pos);
         setRectEnd(pos);
         setIsDrawing(true);
@@ -251,17 +260,11 @@ export function Canvas2D() {
 
       // Pencil or eraser
       setIsDrawing(true);
-      if (activeTool === 'eraser') {
-        setPixel(pos.x, pos.y, null);
-      } else {
-        // Draw with the appropriate color
-        const color = getDrawColor();
-        setPixel(pos.x, pos.y, color);
-      }
-      // Trigger immediate re-render for drawing feedback
-      setDrawingTick(t => t + 1);
+      const color = activeTool === 'eraser' ? null : getDrawColor();
+      setPixel(pos.x, pos.y, color);
+      drawPixelDirect(canvas, pos.x, pos.y, color);
     },
-    [activeTool, scale, setPixel, setDrawingColor, panOffset, getComposite, getDrawColor]
+    [activeTool, scale, setPixel, setDrawingColor, panOffset, getDrawColor, drawPixelDirect]
   );
 
   const handleMouseMove = useCallback(
@@ -291,23 +294,17 @@ export function Canvas2D() {
       if (!isDrawing) return;
       if (!pos) return;
 
-      if (activeTool === 'rectangle') {
+      if (activeTool === 'rectangle' || activeTool === 'rectangleEraser') {
         setRectEnd(pos);
         return;
       }
 
       // Pencil or eraser
-      if (activeTool === 'eraser') {
-        setPixel(pos.x, pos.y, null);
-      } else {
-        // Draw with the appropriate color
-        const color = getDrawColor();
-        setPixel(pos.x, pos.y, color);
-      }
-      // Trigger immediate re-render for drawing feedback
-      setDrawingTick(t => t + 1);
+      const color = activeTool === 'eraser' ? null : getDrawColor();
+      setPixel(pos.x, pos.y, color);
+      drawPixelDirect(canvas, pos.x, pos.y, color);
     },
-    [isDrawing, isPanning, activeTool, scale, setPixel, panStart, getSkinRegionAt, getDrawColor]
+    [isDrawing, isPanning, activeTool, scale, setPixel, panStart, getSkinRegionAt, getDrawColor, drawPixelDirect]
   );
 
   const handleMouseUp = useCallback(() => {
@@ -316,8 +313,8 @@ export function Canvas2D() {
       return;
     }
 
-    if (activeTool === 'rectangle' && rectStart && rectEnd) {
-      const color = getDrawColor();
+    if ((activeTool === 'rectangle' || activeTool === 'rectangleEraser') && rectStart && rectEnd) {
+      const color = activeTool === 'rectangleEraser' ? null : getDrawColor();
       setPixelRect(
         rectStart.x,
         rectStart.y,

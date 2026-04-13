@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Pencil, Eraser, Square, Pipette, Undo2, Redo2, Palette, Sparkles, ShieldOff, Shield } from 'lucide-react';
+import { Pencil, Eraser, Square, SquareDashed, Pipette, Undo2, Redo2, Palette, Sparkles, ShieldOff, Shield } from 'lucide-react';
 import { Button } from '@components/ui/button';
 import {
   Tooltip,
@@ -22,6 +22,7 @@ const tools: { type: ToolType; icon: React.ReactNode; label: string; shortcut: s
   { type: 'pencil', icon: <Pencil className="h-5 w-5" />, label: 'ペンシル', shortcut: 'P' },
   { type: 'eraser', icon: <Eraser className="h-5 w-5" />, label: '消しゴム', shortcut: 'E' },
   { type: 'rectangle', icon: <Square className="h-5 w-5" />, label: '矩形', shortcut: 'R' },
+  { type: 'rectangleEraser', icon: <SquareDashed className="h-5 w-5" />, label: '矩形消しゴム', shortcut: 'Shift+E' },
   { type: 'eyedropper', icon: <Pipette className="h-5 w-5" />, label: 'スポイト', shortcut: 'I' },
 ];
 
@@ -71,7 +72,11 @@ export function Toolbar() {
             setActiveTool('pencil');
             break;
           case 'e':
-            setActiveTool('eraser');
+            if (e.shiftKey) {
+              setActiveTool('rectangleEraser');
+            } else {
+              setActiveTool('eraser');
+            }
             break;
           case 'r':
             setActiveTool('rectangle');

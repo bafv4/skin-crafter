@@ -23,14 +23,31 @@ import { useEditorStore } from '../../stores/editorStore';
 import { downloadSkin, loadSkinFromFile } from '@lib/skinRenderer';
 import { getPixelEngine } from '@lib/pixelEngine';
 import { useEffect, useRef } from 'react';
-import type { Layer, LayerGroup, PaletteColor, RGBA, LayerPixels } from '../../types/editor';
+import type { Layer, LayerGroup, PaletteColor, RGBA, LayerPixels, MaterialType } from '../../types/editor';
 import { createEmptyLayerPixels, SKIN_WIDTH, SKIN_HEIGHT } from '../../types/editor';
 
 // Compact pixel format for layer: [r, g, b, a] or null for transparent
 type CompactLayerPixel = [number, number, number, number] | null;
 
-// Compact layer format (array instead of object)
-// [id, name, baseColor[r,g,b,a], noiseSettings[brightness,hue], groupId, order, layerType, visible, opacity, pixels]
+// Sparse pixel format: [x, y, r, g, b, a] — only non-null pixels stored
+type SparsePixel = [number, number, number, number, number, number];
+
+// Compact layer format v6 (array instead of object)
+// [id, name, baseColor[r,g,b,a], noiseSettings[brightness,hue,material], groupId, order, layerType, visible, opacity, sparsePixels]
+type CompactLayerV6 = [
+  string, // 0: id
+  string, // 1: name
+  [number, number, number, number], // 2: baseColor
+  [number, number, string | null], // 3: noiseSettings [brightness, hue, material]
+  string | null, // 4: groupId
+  number, // 5: order
+  'direct' | 'singleColor', // 6: layerType
+  boolean, // 7: visible
+  number, // 8: opacity
+  SparsePixel[] // 9: sparse pixels (non-null only)
+];
+
+// Legacy v5 layer format
 type CompactLayerV5 = [
   string, // 0: id
   string, // 1: name
@@ -90,24 +107,30 @@ export function Header() {
 
   const handleExportJson = () => {
     try {
-      // Convert layers to compact v5 format (with per-layer pixels)
-      const compactLayers: CompactLayerV5[] = layers.map(l => {
-        // Convert layer pixels to compact format
-        const compactPixels: CompactLayerPixel[][] = l.pixels.map(row =>
-          row.map(p => p === null ? null : [p.r, p.g, p.b, p.a])
-        );
+      // Convert layers to compact v6 format (sparse pixels + material)
+      const compactLayers: CompactLayerV6[] = layers.map(l => {
+        // Convert layer pixels to sparse format (only non-null pixels)
+        const sparsePixels: SparsePixel[] = [];
+        for (let y = 0; y < SKIN_HEIGHT; y++) {
+          for (let x = 0; x < SKIN_WIDTH; x++) {
+            const p = l.pixels[y]?.[x];
+            if (p) {
+              sparsePixels.push([x, y, p.r, p.g, p.b, p.a]);
+            }
+          }
+        }
 
         return [
           l.id,
           l.name,
           [l.baseColor.r, l.baseColor.g, l.baseColor.b, l.baseColor.a],
-          [l.noiseSettings.brightness, l.noiseSettings.hue],
+          [l.noiseSettings.brightness, l.noiseSettings.hue, l.noiseSettings.material ?? null],
           l.groupId,
           l.order,
           l.layerType,
           l.visible,
           l.opacity ?? 100,
-          compactPixels,
+          sparsePixels,
         ];
       });
 
@@ -128,7 +151,7 @@ export function Header() {
       );
 
       const data = {
-        v: 5, // version 5 - per-layer pixels
+        v: 6, // version 6 - sparse pixels + material type
         m: modelType === 'steve' ? 0 : 1, // model type: 0=steve, 1=alex
         l: compactLayers,
         g: compactGroups,
@@ -168,8 +191,30 @@ export function Header() {
 
       let importedLayers: Layer[];
 
-      if (data.v === 5) {
-        // Version 5 format - per-layer pixels
+      if (data.v === 6) {
+        // Version 6 format - sparse pixels + material type
+        importedLayers = (data.l as CompactLayerV6[]).map(l => {
+          // Convert sparse pixels to LayerPixels (64x64 grid)
+          const pixels = createEmptyLayerPixels();
+          for (const sp of l[9]) {
+            pixels[sp[1]][sp[0]] = { r: sp[2], g: sp[3], b: sp[4], a: sp[5] };
+          }
+
+          return {
+            id: l[0],
+            name: l[1],
+            baseColor: { r: l[2][0], g: l[2][1], b: l[2][2], a: l[2][3] },
+            noiseSettings: { brightness: l[3][0], hue: l[3][1], material: (l[3][2] as MaterialType) ?? undefined },
+            groupId: l[4],
+            order: l[5],
+            layerType: l[6],
+            visible: l[7],
+            opacity: l[8] ?? 100,
+            pixels,
+          };
+        });
+      } else if (data.v === 5) {
+        // Version 5 format - per-layer pixels (legacy)
         importedLayers = (data.l as CompactLayerV5[]).map(l => {
           // Convert compact pixels to LayerPixels
           const pixels: LayerPixels = (l[9] as CompactLayerPixel[][]).map(row =>
@@ -224,7 +269,7 @@ export function Header() {
           };
         });
       } else {
-        throw new Error('Unsupported project version. Please use version 4 or 5 format.');
+        throw new Error('Unsupported project version. Please use version 4, 5 or 6 format.');
       }
 
       // Convert compact groups to full format
@@ -276,7 +321,7 @@ export function Header() {
       });
     } catch (error) {
       console.error('Failed to import JSON:', error);
-      alert('プロジェクトファイルの読み込みに失敗しました。バージョン4または5形式のファイルを使用してください。');
+      alert('プロジェクトファイルの読み込みに失敗しました。バージョン4〜6形式のファイルを使用してください。');
     }
 
     e.target.value = '';
