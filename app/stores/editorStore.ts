@@ -1192,7 +1192,12 @@ export const useEditorStore = create<EditorState>()(
     const newLayers = [...layers];
     newLayers[layerIndex] = {
       ...layer,
-      noiseSettings: { brightness, hue, material },
+      // 向きは符号として残す（レイヤー設定を開き直したときにスライダーを同じ位置に戻すため）
+      noiseSettings: {
+        brightness: brightnessDirection === 'negative' ? -brightness : brightness,
+        hue: hueDirection === 'negative' ? -hue : hue,
+        material,
+      },
       pixels: newLayerPixels,
     };
 

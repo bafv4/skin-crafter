@@ -524,9 +524,12 @@ export function mergeSimilarLayers(
       };
       // Apply noise settings if merging with threshold
       if (noiseSettings) {
+        // 強い方を残す（レイヤー設定で適用したノイズは向きを符号で持つので、絶対値で比べる）
+        const stronger = (current: number, fromThreshold: number) =>
+          Math.abs(current) >= fromThreshold ? current : fromThreshold;
         newLayer.noiseSettings = {
-          brightness: Math.max(newLayer.noiseSettings.brightness, noiseSettings.brightness),
-          hue: Math.max(newLayer.noiseSettings.hue, noiseSettings.hue),
+          brightness: stronger(newLayer.noiseSettings.brightness, noiseSettings.brightness),
+          hue: stronger(newLayer.noiseSettings.hue, noiseSettings.hue),
         };
       }
       newLayers.push(newLayer);

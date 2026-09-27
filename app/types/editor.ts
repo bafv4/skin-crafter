@@ -17,8 +17,8 @@ export type MaterialType = 'hair' | 'cloth' | 'skin' | 'metal' | 'plastic' | 'ot
 
 // Noise settings for a layer
 export interface NoiseSettings {
-  brightness: number; // 0-100
-  hue: number; // 0-100
+  brightness: number; // 強さ。負の値は暗くする方向（レイヤー設定で適用したとき）
+  hue: number; // 強さ。負の値は色相をマイナス側へずらす方向
   material?: MaterialType; // Material type for noise characteristics
 }
 

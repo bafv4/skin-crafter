@@ -1577,3 +1577,13 @@ describe('mergeLayersById と重なり順', () => {
     expect(compositeAt(0, 0)).toEqual(BLUE);
   });
 });
+
+describe('applyNoise の向き', () => {
+  it('マイナス方向で適用したノイズは、noiseSettings に負の値として残る', () => {
+    const id = store().createLayer('A', RED);
+    store().applyNoise(id, 5, 3, 'negative', 'positive');
+    expect(store().layers.find((l) => l.id === id)!.noiseSettings).toMatchObject({ brightness: -5, hue: 3 });
+    store().applyNoise(id, 2, 4, 'positive', 'negative');
+    expect(store().layers.find((l) => l.id === id)!.noiseSettings).toMatchObject({ brightness: 2, hue: -4 });
+  });
+});

@@ -2,7 +2,7 @@
 // レイヤーパネルのドラッグ＆ドロップ（並べ替え・グループ間の移動）と履歴のテスト
 import 'fake-indexeddb/auto';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 vi.mock('../../lib/pixelEngine', () => import('../../test/pixelEngineMock'));
 
@@ -465,5 +465,38 @@ describe('レイヤー・グループの削除と履歴', () => {
     s().redo();
     expect(s().layerGroups).toHaveLength(0);
     expect(s().layers.every((l) => l.groupId === null)).toBe(true);
+  });
+});
+
+describe('レイヤー設定のノイズ', () => {
+  function noiseSliders() {
+    return screen.getAllByRole('slider').filter((el) => el.getAttribute('aria-valuemin') === '-100');
+  }
+
+  async function openSettings(id: string) {
+    fireEvent.click(within(layerCard(id)).getByText('レイヤー設定'));
+    return await screen.findByRole('dialog');
+  }
+
+  it('マイナス方向のノイズを生成してから開き直しても、スライダーの位置が変わらない', async () => {
+    const layer = makeLayer('A', 0);
+    layer.layerType = 'singleColor';
+    layer.baseColor = { r: 120, g: 120, b: 120, a: 255 };
+    layer.pixels[0][0] = { ...layer.baseColor };
+    useEditorStore.setState({ layers: [layer] });
+    render(<GroupPanel />);
+
+    let dialog = await openSettings('A');
+    const [brightness, hue] = noiseSliders();
+    fireEvent.keyDown(brightness, { key: 'Home' }); // -100
+    for (let i = 0; i < 30; i++) fireEvent.keyDown(hue, { key: 'ArrowRight' }); // +30
+    const set = noiseSliders().map((el) => el.getAttribute('aria-valuenow'));
+    expect(set).toEqual(['-100', '30']);
+    fireEvent.click(within(dialog).getByRole('button', { name: /生成/ }));
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+    dialog = await openSettings('A');
+    expect(noiseSliders().map((el) => el.getAttribute('aria-valuenow'))).toEqual(set);
   });
 });
