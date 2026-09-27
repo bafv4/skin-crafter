@@ -308,6 +308,27 @@ describe('Toolbar: キーボードショートカット', () => {
       expect(undo).not.toHaveBeenCalled();
     });
 
+    it('Windows / Linux の Ctrl+Shift+Z（key は大文字の Z）で redo を呼ぶ', () => {
+      const { undo, redo } = withSpies();
+      render(<Toolbar />);
+
+      expect(pressKey({ key: 'Z', ctrlKey: true, shiftKey: true }).defaultPrevented).toBe(true);
+
+      expect(redo).toHaveBeenCalledTimes(1);
+      expect(undo).not.toHaveBeenCalled();
+    });
+
+    it('Caps Lock 中の Ctrl+Z / Ctrl+Y（key は大文字）でも undo / redo を呼ぶ', () => {
+      const { undo, redo } = withSpies();
+      render(<Toolbar />);
+
+      expect(pressKey({ key: 'Z', ctrlKey: true }).defaultPrevented).toBe(true);
+      expect(pressKey({ key: 'Y', ctrlKey: true }).defaultPrevented).toBe(true);
+
+      expect(undo).toHaveBeenCalledTimes(1);
+      expect(redo).toHaveBeenCalledTimes(1);
+    });
+
     it('修飾キーなしの Z / Y は何もしない', () => {
       const { undo, redo } = withSpies();
       render(<Toolbar />);

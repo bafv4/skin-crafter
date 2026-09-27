@@ -82,12 +82,13 @@ export function Toolbar() {
         }
       }
 
-      // Undo/Redo
+      // Undo/Redo（Shift や Caps Lock で key が大文字になっても同じように扱う）
       if (e.ctrlKey || e.metaKey) {
-        if (e.key === 'z' && !e.shiftKey) {
+        const key = e.key.toLowerCase();
+        if (key === 'z' && !e.shiftKey) {
           e.preventDefault();
           undo();
-        } else if ((e.key === 'y') || (e.key === 'z' && e.shiftKey)) {
+        } else if (key === 'y' || (key === 'z' && e.shiftKey)) {
           e.preventDefault();
           redo();
         }
