@@ -42,7 +42,7 @@ export function Preview3D() {
   return (
     <div className="flex h-full flex-col bg-muted/30">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-card px-4 py-2">
-        <span className="shrink-0 whitespace-nowrap text-sm font-medium">3Dプレビュー</span>
+        <span className="hidden shrink-0 whitespace-nowrap text-sm font-medium sm:inline">3Dプレビュー</span>
         <TooltipProvider>
           <div className="flex flex-wrap items-center justify-end gap-2">
             <ButtonGroup>

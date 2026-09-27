@@ -105,14 +105,15 @@ export function Toolbar() {
 
   return (
     <TooltipProvider delayDuration={300}>
-      <div className="flex w-16 flex-col items-center gap-1.5 border-r border-border bg-card py-3">
+      {/* 画面が低いときは縦にスクロールできるようにする（下端の元に戻す・やり直しが隠れないように） */}
+      <div className="flex w-12 shrink-0 flex-col items-center gap-1.5 overflow-y-auto border-r border-border bg-card py-3 sm:w-16">
         {TOOLS.map((tool) => (
           <Tooltip key={tool.type}>
             <TooltipTrigger asChild>
               <Button
                 variant={activeTool === tool.type ? 'default' : 'ghost'}
                 size="icon"
-                className="h-10 w-10"
+                className="h-9 w-9 shrink-0 sm:h-10 sm:w-10"
                 onClick={() => setActiveTool(tool.type)}
               >
                 {tool.icon}
@@ -124,7 +125,7 @@ export function Toolbar() {
           </Tooltip>
         ))}
 
-        <div className="my-1.5 h-px w-10 bg-border" />
+        <div className="my-1.5 h-px w-8 shrink-0 bg-border sm:w-10" />
 
         {/* Preserve pixels toggle */}
         <Tooltip>
@@ -132,7 +133,7 @@ export function Toolbar() {
             <Button
               variant={preservePixels ? 'default' : 'ghost'}
               size="icon"
-              className="h-10 w-10"
+              className="h-9 w-9 shrink-0 sm:h-10 sm:w-10"
               onClick={togglePreservePixels}
             >
               {preservePixels ? <Shield className="h-5 w-5" /> : <ShieldOff className="h-5 w-5" />}
@@ -150,7 +151,7 @@ export function Toolbar() {
               <TooltipTrigger asChild>
                 <PopoverTrigger asChild>
                   <button
-                    className="h-10 w-10 rounded-md border-2 border-border hover:border-muted-foreground transition-colors flex items-center justify-center"
+                    className="h-9 w-9 shrink-0 sm:h-10 sm:w-10 rounded-md border-2 border-border hover:border-muted-foreground transition-colors flex items-center justify-center"
                     style={{ backgroundColor: rgbaToHex(drawingColor) }}
                   >
                     <Palette className="h-4 w-4 drop-shadow-[0_0_2px_rgba(255,255,255,0.8)]" style={{ color: drawingColor.r + drawingColor.g + drawingColor.b > 380 ? '#000' : '#fff' }} />
@@ -176,7 +177,7 @@ export function Toolbar() {
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-10 w-10"
+                className="h-9 w-9 shrink-0 sm:h-10 sm:w-10"
                 onClick={() => setGenerateDialogOpen(true)}
               >
                 <Sparkles className="h-5 w-5" />
@@ -188,14 +189,14 @@ export function Toolbar() {
           </Tooltip>
         )}
 
-        <div className="flex-1" />
+        <div className="flex-1 min-h-2" />
 
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
               variant="ghost"
               size="icon"
-              className="h-10 w-10"
+              className="h-9 w-9 shrink-0 sm:h-10 sm:w-10"
               onClick={undo}
               disabled={!canUndo}
             >
@@ -212,7 +213,7 @@ export function Toolbar() {
             <Button
               variant="ghost"
               size="icon"
-              className="h-10 w-10"
+              className="h-9 w-9 shrink-0 sm:h-10 sm:w-10"
               onClick={redo}
               disabled={!canRedo}
             >

@@ -6,22 +6,29 @@ export interface HintItem {
   label: string;
 }
 
-// ブラウザごとの表示設定（失敗しても表示は継続する）
+// 小さい画面（スマホ）では、表示領域を隠さないよう最初は折りたたんでおく
+const SMALL_SCREEN_QUERY = '(max-width: 767px), (max-height: 499px)';
+
+function isSmallScreen(): boolean {
+  return typeof window.matchMedia === 'function' && window.matchMedia(SMALL_SCREEN_QUERY).matches;
+}
+
+// ブラウザごとの表示設定（失敗しても表示は継続する）。未設定なら画面の大きさで決める
 function readHidden(storageKey: string): boolean {
+  let stored: string | null = null;
   try {
-    return localStorage.getItem(storageKey) === 'hidden';
+    stored = localStorage.getItem(storageKey);
   } catch {
-    return false;
+    // ストレージが使えない環境では既定値を使う
   }
+  if (stored === 'hidden') return true;
+  if (stored === 'shown') return false;
+  return isSmallScreen();
 }
 
 function writeHidden(storageKey: string, hidden: boolean) {
   try {
-    if (hidden) {
-      localStorage.setItem(storageKey, 'hidden');
-    } else {
-      localStorage.removeItem(storageKey);
-    }
+    localStorage.setItem(storageKey, hidden ? 'hidden' : 'shown');
   } catch {
     // ストレージが使えない環境では保存しない
   }

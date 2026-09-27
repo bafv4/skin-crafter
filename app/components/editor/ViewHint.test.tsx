@@ -78,7 +78,7 @@ describe('ViewHint: 表示/非表示の切り替えと保存', () => {
     expect(localStorage.getItem(KEY)).toBe('hidden');
   });
 
-  it('表示ボタンで元に戻し、保存していた設定を削除する', async () => {
+  it('表示ボタンで元に戻し、表示する設定を保存する', async () => {
     const user = userEvent.setup();
     render(<ViewHint items={ITEMS} storageKey={KEY} />);
 
@@ -87,7 +87,7 @@ describe('ViewHint: 表示/非表示の切り替えと保存', () => {
 
     expect(queryNote()).not.toBeNull();
     expect(within(getNote()).getAllByRole('listitem')).toHaveLength(ITEMS.length);
-    expect(localStorage.getItem(KEY)).toBeNull();
+    expect(localStorage.getItem(KEY)).toBe('shown');
   });
 
   it('隠した設定はマウントし直しても維持される', async () => {
@@ -159,9 +159,6 @@ describe('ViewHint: localStorage が使えない環境', () => {
     const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new DOMException('quota', 'QuotaExceededError');
     });
-    const removeItem = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {
-      throw new DOMException('denied', 'SecurityError');
-    });
     const user = userEvent.setup();
     render(<ViewHint items={ITEMS} storageKey={KEY} />);
 
@@ -170,7 +167,42 @@ describe('ViewHint: localStorage が使えない環境', () => {
     expect(queryNote()).toBeNull();
 
     await user.click(getShowButton());
-    expect(removeItem).toHaveBeenCalledWith(KEY);
+    expect(setItem).toHaveBeenCalledWith(KEY, 'shown');
+    expect(queryNote()).not.toBeNull();
+  });
+});
+
+describe('ViewHint（小さい画面）', () => {
+  function mockSmallScreen(matches: boolean) {
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches, media: query }) as MediaQueryList);
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    localStorage.clear();
+  });
+
+  it('設定がなければ、小さい画面では最初から折りたたんでおく', () => {
+    mockSmallScreen(true);
+    render(<ViewHint items={ITEMS} storageKey={KEY} />);
+    expect(queryNote()).toBeNull();
+    expect(getShowButton()).toBeTruthy();
+  });
+
+  it('小さい画面でも、表示に戻した設定はマウントし直しても維持される', async () => {
+    mockSmallScreen(true);
+    const user = userEvent.setup();
+    const first = render(<ViewHint items={ITEMS} storageKey={KEY} />);
+    await user.click(getShowButton());
+    first.unmount();
+
+    render(<ViewHint items={ITEMS} storageKey={KEY} />);
+    expect(queryNote()).not.toBeNull();
+  });
+
+  it('大きい画面では最初から表示する', () => {
+    mockSmallScreen(false);
+    render(<ViewHint items={ITEMS} storageKey={KEY} />);
     expect(queryNote()).not.toBeNull();
   });
 });

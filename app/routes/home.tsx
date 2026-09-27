@@ -6,7 +6,8 @@ import { Canvas2D } from '@components/editor/Canvas2D';
 import { LayerPanel } from '@components/editor/GroupPanel';
 import { ResizableHorizontalPanel } from '@components/ui/ResizableHorizontalPanel';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@components/ui/tabs';
-import { Grid2X2, Box, Loader2 } from 'lucide-react';
+import { Grid2X2, Box, Layers, Loader2 } from 'lucide-react';
+import { useEditorStore } from '../stores/editorStore';
 
 // Constants for layer panel resizing
 const DEFAULT_LAYER_PANEL_WIDTH = 288; // 72 * 4 = 288px (w-72)
@@ -39,17 +40,24 @@ export function meta({}: Route.MetaArgs) {
 // Breakpoints for compact layout detection
 const NARROW_WIDTH_BREAKPOINT = 1024;
 const SHORT_HEIGHT_BREAKPOINT = 800;
+// これより狭い画面（スマホ）では、レイヤーパネルも含めてタブで切り替える
+const MOBILE_WIDTH_BREAKPOINT = 768;
 
-function useIsCompactLayout() {
-  const [isCompact, setIsCompact] = useState(false);
+type LayoutMode = 'wide' | 'compact' | 'mobile';
+
+function useLayoutMode(): LayoutMode {
+  const [mode, setMode] = useState<LayoutMode>('wide');
 
   useEffect(() => {
     const checkSize = () => {
-      // Use tab layout if screen is narrow OR short
-      setIsCompact(
-        window.innerWidth < NARROW_WIDTH_BREAKPOINT ||
-        window.innerHeight < SHORT_HEIGHT_BREAKPOINT
-      );
+      if (window.innerWidth < MOBILE_WIDTH_BREAKPOINT) {
+        setMode('mobile');
+      } else if (window.innerWidth < NARROW_WIDTH_BREAKPOINT || window.innerHeight < SHORT_HEIGHT_BREAKPOINT) {
+        // Use tab layout if screen is narrow OR short
+        setMode('compact');
+      } else {
+        setMode('wide');
+      }
     };
 
     checkSize();
@@ -57,11 +65,69 @@ function useIsCompactLayout() {
     return () => window.removeEventListener('resize', checkSize);
   }, []);
 
-  return isCompact;
+  return mode;
+}
+
+function Preview3DWithFallback() {
+  return (
+    <Suspense fallback={<Preview3DFallback />}>
+      <Preview3D />
+    </Suspense>
+  );
+}
+
+const TAB_TRIGGER_CLASS = 'gap-1.5 px-3 text-xs';
+
+// スマホ幅: レイヤー / 2D / 3D をタブで切り替える
+function MobileEditor() {
+  const [tab, setTab] = useState('canvas');
+  // レイヤー設定の「キャンバスから取得」中は 2D キャンバスを表示し、終わったらレイヤーに戻す
+  const isPickingLayerColor = useEditorStore((state) => state.layerColorPickTarget !== null);
+  const tabBeforePick = useRef<string | null>(null);
+  useEffect(() => {
+    if (isPickingLayerColor) {
+      tabBeforePick.current = tab;
+      setTab('canvas');
+    } else if (tabBeforePick.current !== null) {
+      setTab(tabBeforePick.current);
+      tabBeforePick.current = null;
+    }
+  }, [isPickingLayerColor]);
+
+  return (
+    <Tabs value={tab} onValueChange={setTab} className="flex min-w-0 flex-1 flex-col overflow-hidden">
+      <div className="flex items-center justify-center border-b border-border bg-card px-2 py-1.5">
+        <TabsList className="h-8">
+          <TabsTrigger value="layers" className={TAB_TRIGGER_CLASS}>
+            <Layers className="h-3.5 w-3.5" />
+            レイヤー
+          </TabsTrigger>
+          <TabsTrigger value="canvas" className={TAB_TRIGGER_CLASS}>
+            <Grid2X2 className="h-3.5 w-3.5" />
+            2D
+          </TabsTrigger>
+          <TabsTrigger value="preview" className={TAB_TRIGGER_CLASS}>
+            <Box className="h-3.5 w-3.5" />
+            3D
+          </TabsTrigger>
+        </TabsList>
+      </div>
+      {/* レイヤーパネルと 2D キャンバスは切り替えても状態（開いているダイアログや表示倍率）を保つ */}
+      <TabsContent value="layers" forceMount className="m-0 flex-1 overflow-hidden data-[state=inactive]:hidden">
+        <LayerPanel fill />
+      </TabsContent>
+      <TabsContent value="canvas" forceMount className="m-0 flex-1 overflow-hidden data-[state=inactive]:hidden">
+        <Canvas2D />
+      </TabsContent>
+      <TabsContent value="preview" className="m-0 flex-1 overflow-hidden">
+        <Preview3DWithFallback />
+      </TabsContent>
+    </Tabs>
+  );
 }
 
 export default function Home() {
-  const isCompactLayout = useIsCompactLayout();
+  const layoutMode = useLayoutMode();
 
   // Layer panel resizing state
   const [layerPanelWidth, setLayerPanelWidth] = useState(DEFAULT_LAYER_PANEL_WIDTH);
@@ -100,6 +166,10 @@ export default function Home() {
         {/* Left: Toolbar */}
         <Toolbar />
 
+        {layoutMode === 'mobile' ? (
+          <MobileEditor />
+        ) : (
+        <>
         {/* Left-center: Layer Panel with resizer */}
         <div className="flex h-full">
           <LayerPanel width={layerPanelWidth} />
@@ -114,7 +184,7 @@ export default function Home() {
         </div>
 
         {/* Right: Canvas and Preview */}
-        {isCompactLayout ? (
+        {layoutMode === 'compact' ? (
           // Compact layout (narrow or short screen): Tab-based layout
           <Tabs defaultValue="canvas" className="flex flex-1 flex-col overflow-hidden">
             <div className="flex items-center justify-center border-b border-border bg-card px-2 py-1.5">
@@ -133,26 +203,22 @@ export default function Home() {
               <Canvas2D />
             </TabsContent>
             <TabsContent value="preview" className="m-0 flex-1 overflow-hidden">
-              <Suspense fallback={<Preview3DFallback />}>
-                <Preview3D />
-              </Suspense>
+              <Preview3DWithFallback />
             </TabsContent>
           </Tabs>
         ) : (
           // Normal layout (wide and tall screen): Horizontal resizable panel layout
           <ResizableHorizontalPanel
             leftPanel={<Canvas2D />}
-            rightPanel={
-              <Suspense fallback={<Preview3DFallback />}>
-                <Preview3D />
-              </Suspense>
-            }
+            rightPanel={<Preview3DWithFallback />}
             leftLabel="2Dキャンバス"
             rightLabel="3Dプレビュー"
             defaultLeftWidth={50}
             minLeftWidth={25}
             maxLeftWidth={75}
           />
+        )}
+        </>
         )}
       </div>
     </div>

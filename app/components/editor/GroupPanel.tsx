@@ -1273,7 +1273,8 @@ const LayerGroupItem = memo(function LayerGroupItem({
   );
 });
 
-export function LayerPanel({ width }: { width?: number }) {
+// fill: 親の幅いっぱいに表示する（スマホ幅のタブ表示用）
+export function LayerPanel({ width, fill = false }: { width?: number; fill?: boolean }) {
   // Use individual selectors to minimize re-renders
   // Custom equality: only re-render when layer metadata changes (not pixel data)
   const layers = useStoreWithEqualityFn(
@@ -1503,12 +1504,12 @@ export function LayerPanel({ width }: { width?: number }) {
   }, [deleteDialogState, deleteLayer, recordHistory]);
 
   // Calculate width style
-  const widthStyle = width !== undefined ? { width: `${width}px` } : undefined;
-  const widthClass = width !== undefined ? '' : 'w-72';
+  const widthStyle = !fill && width !== undefined ? { width: `${width}px` } : undefined;
+  const widthClass = fill ? 'w-full' : width !== undefined ? '' : 'w-72';
 
   return (
     <TooltipProvider delayDuration={300}>
-      <div className={`flex h-full flex-col border-r border-border bg-card ${widthClass}`} style={widthStyle}>
+      <div className={`flex h-full flex-col bg-card ${fill ? '' : 'border-r border-border'} ${widthClass}`} style={widthStyle}>
         <div className="border-b border-border p-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-foreground">レイヤー</h2>

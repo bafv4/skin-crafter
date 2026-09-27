@@ -23,8 +23,16 @@ import { TOOLS } from './Toolbar';
 import { CanvasBackgroundMenu } from './CanvasBackgroundPicker';
 
 const DEFAULT_SCALE = 8;
-const MIN_SCALE = 4;
+const MIN_SCALE = 2;
 const MAX_SCALE = 32;
+// キャンバスの周りの余白（表示領域の p-4、枠の p-2 と罫線）
+const CANVAS_FRAME_PADDING = 2 * (16 + 8 + 1);
+
+// 表示領域に収まる倍率。既定の倍率より大きくはしない（広い画面ではこれまでどおり 8x）
+export function fitScale(width: number, height: number): number {
+  const fit = Math.floor(Math.min(width - CANVAS_FRAME_PADDING, height - CANVAS_FRAME_PADDING) / SKIN_WIDTH);
+  return Math.max(MIN_SCALE, Math.min(DEFAULT_SCALE, fit));
+}
 
 export function Canvas2D() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -33,6 +41,8 @@ export function Canvas2D() {
   const containerRef = useRef<HTMLDivElement>(null);
   const rafIdRef = useRef<number | null>(null);
   const [scale, setScale] = useState(DEFAULT_SCALE);
+  // 拡大・縮小の操作をするまでは、表示領域の大きさに合わせて倍率を決める
+  const userZoomedRef = useRef(false);
   const [isDrawing, setIsDrawing] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
@@ -361,9 +371,28 @@ export function Canvas2D() {
     setRectEnd(null);
   }, [isPanning, activeTool, rectStart, rectEnd, setPixelRect, isDrawing, commitDrawing, getDrawColor]);
 
+  // 表示領域の大きさが変わったら（画面の回転・パネル幅の変更など）収まる倍率にする
+  const fitToContainer = useCallback(() => {
+    const container = containerRef.current;
+    // 非表示のタブ内では大きさが 0 になるので何もしない
+    if (!container || container.clientWidth === 0 || container.clientHeight === 0) return;
+    setScale(fitScale(container.clientWidth, container.clientHeight));
+  }, []);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      if (!userZoomedRef.current) fitToContainer();
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [fitToContainer]);
+
   // Handle wheel zoom
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
+    userZoomedRef.current = true;
     setScale((prev) => {
       const delta = e.deltaY > 0 ? -1 : 1;
       return Math.max(MIN_SCALE, Math.min(MAX_SCALE, prev + delta));
@@ -371,10 +400,19 @@ export function Canvas2D() {
   }, []);
 
   // Zoom handlers
-  const handleZoomIn = () => setScale((s) => Math.min(s + 2, MAX_SCALE));
-  const handleZoomOut = () => setScale((s) => Math.max(s - 2, MIN_SCALE));
+  const handleZoomIn = () => {
+    userZoomedRef.current = true;
+    setScale((s) => Math.min(s + 2, MAX_SCALE));
+  };
+  const handleZoomOut = () => {
+    userZoomedRef.current = true;
+    setScale((s) => Math.max(s - 2, MIN_SCALE));
+  };
+  // 表示をリセット: 表示領域に収まる倍率と中央の位置に戻し、以降も大きさに合わせる
   const handleReset = () => {
+    userZoomedRef.current = false;
     setScale(DEFAULT_SCALE);
+    fitToContainer();
     setPanOffset({ x: 0, y: 0 });
   };
 
@@ -404,7 +442,8 @@ export function Canvas2D() {
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-card px-4 py-2">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium">2Dキャンバス</span>
+          {/* スマホ幅ではタブに「2D」とあるので見出しを省く */}
+          <span className="hidden text-sm font-medium sm:inline">2Dキャンバス</span>
           {hoveredRegion && (
             <span className={`rounded px-1.5 py-0.5 text-xs ${
               hoveredRegion.layer === 1
