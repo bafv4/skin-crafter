@@ -45,7 +45,7 @@ function PartFigure({
   kind: LayerKind;
   visibility: PartVisibility;
   armWidth: number;
-  disabled?: boolean;
+  disabled: boolean;
   onToggle: (part: BodyPartKey) => void;
 }) {
   const rects = getPartRects(armWidth);

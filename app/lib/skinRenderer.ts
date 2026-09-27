@@ -168,6 +168,12 @@ export function drawLayerHighlight(
   }
 }
 
+// 市松模様（透明部分の背景）の配色
+export const CHECKER_COLORS = {
+  light: ['#ffffff', '#cccccc'],
+  dark: ['#3a3a3a', '#2a2a2a'],
+} as const;
+
 // Checkerboard cache for avoiding re-rendering
 let checkerboardCache: { width: number; height: number; scale: number; size: number; color1: string; color2: string; canvas: HTMLCanvasElement } | null = null;
 
@@ -178,8 +184,8 @@ export function drawCheckerboard(
   height: number,
   scale: number,
   size: number = 4,
-  color1: string = '#ffffff',
-  color2: string = '#cccccc'
+  color1: string = CHECKER_COLORS.light[0],
+  color2: string = CHECKER_COLORS.light[1]
 ): void {
   // Check cache
   if (checkerboardCache &&

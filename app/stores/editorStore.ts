@@ -132,8 +132,10 @@ interface EditorState {
   setPixelRect: (x1: number, y1: number, x2: number, y2: number, color: RGBA | null) => void;
   commitDrawing: () => void;
   setActiveTool: (tool: ToolType) => void;
-  // スポイト使用後、直前のツールに戻す
-  restorePreviousTool: () => void;
+  // スポイトで取得した色を反映し、直前のツールに戻す
+  // （レイヤー基本色の取得中ならその基本色に、そうでなければ描画カラーに反映）
+  applyPickedColor: (color: RGBA) => void;
+  // レイヤー基本色の取得（対象レイヤー付きのスポイト）を開始・キャンセル
   startLayerColorPick: (layerId: string) => void;
   endLayerColorPick: () => void;
   setActiveLayer: (layerId: string | null) => void;
@@ -809,15 +811,29 @@ export const useEditorStore = create<EditorState>()(
   },
 
   setActiveTool: (tool) => set((state) => {
-    // スポイトに切り替えるときは、戻り先として現在のツールを記録する
-    if (tool === 'eyedropper' && state.activeTool !== 'eyedropper') {
-      return { activeTool: tool, previousTool: state.activeTool };
+    if (tool === 'eyedropper') {
+      // スポイトに切り替えるときは、戻り先として現在のツールを記録する
+      return state.activeTool === 'eyedropper' ? {} : { activeTool: tool, previousTool: state.activeTool };
     }
-    return { activeTool: tool };
+    // 他のツールに切り替えたら基本色の取得は終了
+    return { activeTool: tool, layerColorPickTarget: null };
   }),
-  restorePreviousTool: () => set((state) => ({ activeTool: state.previousTool })),
-  startLayerColorPick: (layerId) => set({ layerColorPickTarget: layerId }),
-  endLayerColorPick: () => set({ layerColorPickTarget: null }),
+  applyPickedColor: (color) => {
+    const { layerColorPickTarget: target, layers, updateLayerColor, saveToHistory } = get();
+    if (target && layers.some((l) => l.id === target)) {
+      updateLayerColor(target, { ...color });
+      saveToHistory();
+      set((state) => ({ activeTool: state.previousTool, layerColorPickTarget: null }));
+    } else {
+      set((state) => ({ drawingColor: { ...color }, activeTool: state.previousTool, layerColorPickTarget: null }));
+    }
+  },
+  startLayerColorPick: (layerId) => set((state) => ({
+    layerColorPickTarget: layerId,
+    activeTool: 'eyedropper',
+    previousTool: state.activeTool === 'eyedropper' ? state.previousTool : state.activeTool,
+  })),
+  endLayerColorPick: () => set((state) => ({ layerColorPickTarget: null, activeTool: state.previousTool })),
   setActiveLayer: (layerId) => set({ activeLayerId: layerId }),
   setHighlightedLayer: (layerId) => set({ highlightedLayerId: layerId }),
   setDrawingColor: (color) => set({ drawingColor: color }),

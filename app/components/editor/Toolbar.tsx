@@ -18,13 +18,20 @@ import type { ToolType } from '../../types/editor';
 import { rgbaToHex } from '../../types/editor';
 import { GenerateOptionsDialog } from './GroupPanel';
 
-const tools: { type: ToolType; icon: React.ReactNode; label: string; shortcut: string }[] = [
+export const TOOLS: { type: ToolType; icon: React.ReactNode; label: string; shortcut: string }[] = [
   { type: 'pencil', icon: <Pencil className="h-5 w-5" />, label: 'ペンシル', shortcut: 'P' },
   { type: 'eraser', icon: <Eraser className="h-5 w-5" />, label: '消しゴム', shortcut: 'E' },
   { type: 'rectangle', icon: <Square className="h-5 w-5" />, label: '矩形', shortcut: 'R' },
   { type: 'rectangleEraser', icon: <SquareDashed className="h-5 w-5" />, label: '矩形消しゴム', shortcut: 'Shift+E' },
   { type: 'eyedropper', icon: <Pipette className="h-5 w-5" />, label: 'スポイト', shortcut: 'I' },
 ];
+
+const TOOL_SHORTCUTS: Record<string, ToolType | ((shift: boolean) => ToolType)> = {
+  p: 'pencil',
+  e: (shift) => (shift ? 'rectangleEraser' : 'eraser'),
+  r: 'rectangle',
+  i: 'eyedropper',
+};
 
 export function Toolbar() {
   // Use individual selectors to minimize re-renders
@@ -67,23 +74,11 @@ export function Toolbar() {
 
       // Tool shortcuts
       if (!e.ctrlKey && !e.metaKey) {
-        switch (e.key.toLowerCase()) {
-          case 'p':
-            setActiveTool('pencil');
-            break;
-          case 'e':
-            if (e.shiftKey) {
-              setActiveTool('rectangleEraser');
-            } else {
-              setActiveTool('eraser');
-            }
-            break;
-          case 'r':
-            setActiveTool('rectangle');
-            break;
-          case 'i':
-            setActiveTool('eyedropper');
-            break;
+        const tool = TOOL_SHORTCUTS[e.key.toLowerCase()];
+        if (tool) {
+          // キー入力を消費する（ツール切替で開いたダイアログの入力欄に文字が入らないように）
+          e.preventDefault();
+          setActiveTool(typeof tool === 'function' ? tool(e.shiftKey) : tool);
         }
       }
 
@@ -110,7 +105,7 @@ export function Toolbar() {
   return (
     <TooltipProvider delayDuration={300}>
       <div className="flex w-16 flex-col items-center gap-1.5 border-r border-border bg-card py-3">
-        {tools.map((tool) => (
+        {TOOLS.map((tool) => (
           <Tooltip key={tool.type}>
             <TooltipTrigger asChild>
               <Button

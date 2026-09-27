@@ -1,6 +1,5 @@
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { CircleHelp, X } from 'lucide-react';
-import { cn } from '@lib/utils';
 
 export interface HintItem {
   keys: string[];
@@ -37,14 +36,12 @@ function Kbd({ children }: { children: React.ReactNode }) {
 }
 
 // ビュー下部に重ねて表示する操作方法のヒント
-export function ViewHint({
+export const ViewHint = memo(function ViewHint({
   items,
   storageKey,
-  className,
 }: {
   items: HintItem[];
   storageKey: string;
-  className?: string;
 }) {
   const [hidden, setHidden] = useState(false);
 
@@ -65,10 +62,7 @@ export function ViewHint({
         onClick={() => toggle(false)}
         aria-label="操作方法を表示"
         title="操作方法を表示"
-        className={cn(
-          'absolute bottom-2 left-2 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-border bg-card/90 text-muted-foreground shadow-sm backdrop-blur hover:text-foreground',
-          className
-        )}
+        className="absolute bottom-2 left-2 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-border bg-card/90 text-muted-foreground shadow-sm backdrop-blur hover:text-foreground"
       >
         <CircleHelp className="h-3.5 w-3.5" />
       </button>
@@ -77,10 +71,7 @@ export function ViewHint({
 
   return (
     <div
-      className={cn(
-        'pointer-events-none absolute inset-x-2 bottom-2 z-10 flex justify-start',
-        className
-      )}
+      className="pointer-events-none absolute inset-x-2 bottom-2 z-10 flex justify-start"
     >
       <div
         role="note"
@@ -112,4 +103,4 @@ export function ViewHint({
       </div>
     </div>
   );
-}
+});

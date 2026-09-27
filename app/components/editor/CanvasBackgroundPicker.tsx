@@ -1,21 +1,21 @@
 import { useEditorStore } from '../../stores/editorStore';
+import { Button } from '@components/ui/button';
 import { Label } from '@components/ui/label';
+import { Popover, PopoverContent, PopoverTrigger } from '@components/ui/popover';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@components/ui/tooltip';
+import { CHECKER_COLORS } from '@lib/skinRenderer';
 import { cn } from '@lib/utils';
 import type { CanvasBackground } from '../../types/editor';
 
-// 市松模様の配色
-export const CHECKER_COLORS = {
-  light: ['#ffffff', '#cccccc'],
-  dark: ['#3a3a3a', '#2a2a2a'],
-} as const;
-
-// 単色背景のプリセット（肌色や白と見分けやすい色を中心に）
-const SOLID_PRESETS: { color: string; label: string }[] = [
-  { color: '#000000', label: '黒' },
-  { color: '#808080', label: 'グレー' },
-  { color: '#ff00ff', label: 'マゼンタ' },
-  { color: '#00ff00', label: 'グリーン' },
-  { color: '#1e3a8a', label: '紺' },
+// 背景のプリセット（単色は肌色や白と見分けやすい色を中心に）
+const OPTIONS: { value: CanvasBackground; label: string }[] = [
+  { value: { type: 'checker', variant: 'light' }, label: '市松（明）' },
+  { value: { type: 'checker', variant: 'dark' }, label: '市松（暗）' },
+  { value: { type: 'solid', color: '#000000' }, label: '黒' },
+  { value: { type: 'solid', color: '#808080' }, label: 'グレー' },
+  { value: { type: 'solid', color: '#ff00ff' }, label: 'マゼンタ' },
+  { value: { type: 'solid', color: '#00ff00' }, label: 'グリーン' },
+  { value: { type: 'solid', color: '#1e3a8a' }, label: '紺' },
 ];
 
 function checkerStyle(variant: 'light' | 'dark'): React.CSSProperties {
@@ -34,7 +34,7 @@ function isSame(a: CanvasBackground, b: CanvasBackground): boolean {
 }
 
 // 背景の見本（ボタン内アイコン用にも使う）
-export function CanvasBackgroundSwatch({ background, className }: { background: CanvasBackground; className?: string }) {
+function CanvasBackgroundSwatch({ background, className }: { background: CanvasBackground; className?: string }) {
   return (
     <span
       className={cn('inline-block rounded-sm border border-border', className)}
@@ -43,18 +43,37 @@ export function CanvasBackgroundSwatch({ background, className }: { background: 
   );
 }
 
-export function CanvasBackgroundPicker() {
+// キャンバス上部の「背景」ボタン（ポップオーバーで背景を選択）
+export function CanvasBackgroundMenu() {
+  const background = useEditorStore((state) => state.canvasBackground);
+  return (
+    <Popover>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <Button variant="outline" size="sm" aria-label="背景">
+              <CanvasBackgroundSwatch background={background} className="mr-1 h-3 w-3" />
+              背景
+            </Button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p>キャンバスの背景を変更</p>
+        </TooltipContent>
+      </Tooltip>
+      <PopoverContent align="end" className="w-80">
+        <CanvasBackgroundPicker />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function CanvasBackgroundPicker() {
   const background = useEditorStore((state) => state.canvasBackground);
   const setBackground = useEditorStore((state) => state.setCanvasBackground);
 
-  const options: { value: CanvasBackground; label: string }[] = [
-    { value: { type: 'checker', variant: 'light' }, label: '市松（明）' },
-    { value: { type: 'checker', variant: 'dark' }, label: '市松（暗）' },
-    ...SOLID_PRESETS.map((p) => ({ value: { type: 'solid', color: p.color } as CanvasBackground, label: p.label })),
-  ];
-
   const customColor = background.type === 'solid' ? background.color : '#808080';
-  const isCustom = background.type === 'solid' && !SOLID_PRESETS.some((p) => p.color === background.color.toLowerCase());
+  const isCustom = !OPTIONS.some((option) => isSame(background, option.value));
 
   return (
     <div className="space-y-3">
@@ -65,7 +84,7 @@ export function CanvasBackgroundPicker() {
         </p>
       </div>
       <div className="grid grid-cols-4 gap-2">
-        {options.map((option) => {
+        {OPTIONS.map((option) => {
           const selected = isSame(background, option.value);
           return (
             <button

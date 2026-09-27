@@ -22,7 +22,8 @@ const HINT_ITEMS: HintItem[] = [
 ];
 
 export function Preview3D() {
-  const { showLayer2, toggleLayer2 } = useEditorStore();
+  const showLayer2 = useEditorStore((state) => state.showLayer2);
+  const toggleLayer2 = useEditorStore((state) => state.toggleLayer2);
   const [autoRotate, setAutoRotate] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [resetKey, setResetKey] = useState(0);

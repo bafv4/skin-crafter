@@ -68,9 +68,9 @@ function useSkinTexture() {
     // Clamp to edge to prevent texture bleeding at seams
     tex.wrapS = THREE.ClampToEdgeWrapping;
     tex.wrapT = THREE.ClampToEdgeWrapping;
-    // Use NoColorSpace to prevent gamma correction - display colors exactly as in 2D canvas
-    // The pixel data is already in sRGB, and we want to display it without any transformation
-    tex.colorSpace = THREE.NoColorSpace;
+    // ピクセルデータは sRGB。sRGB として扱えば（トーンマッピング無効の下で）デコード→再エンコードで
+    // 2D キャンバスと同じ値が出力される
+    tex.colorSpace = THREE.SRGBColorSpace;
     tex.needsUpdate = true;
     textureRef.current = tex;
   }
@@ -207,8 +207,8 @@ function BodyPart({
   uvMap,
   texture,
   layer2UvMap,
-  layer2Extra = 0,
-  showInner = true,
+  layer2Extra,
+  showInner,
   showLayer2,
 }: {
   position: [number, number, number];
@@ -223,9 +223,9 @@ function BodyPart({
   };
   texture: THREE.Texture;
   layer2UvMap?: typeof uvMap;
-  layer2Extra?: number;
-  showInner?: boolean;
-  showLayer2?: boolean;
+  layer2Extra: number;
+  showInner: boolean;
+  showLayer2: boolean;
 }) {
   const geometry = useMemo(
     () => createSkinGeometry(size[0], size[1], size[2], uvMap),
@@ -252,18 +252,17 @@ function BodyPart({
 
   return (
     <group position={position}>
-      {showInner && (
-        <mesh geometry={geometry}>
-          <meshBasicMaterial
-            map={texture}
-            transparent
-            alphaTest={0.1}
-            side={THREE.DoubleSide}
-          />
-        </mesh>
-      )}
-      {showLayer2 && layer2Geometry && (
-        <mesh geometry={layer2Geometry}>
+      {/* 表示切り替えは visible で行い、メッシュ・マテリアルの再生成を避ける */}
+      <mesh geometry={geometry} visible={showInner}>
+        <meshBasicMaterial
+          map={texture}
+          transparent
+          alphaTest={0.1}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+      {layer2Geometry && (
+        <mesh geometry={layer2Geometry} visible={showLayer2}>
           <meshBasicMaterial
             map={texture}
             transparent
@@ -573,22 +572,20 @@ export function Preview3DCanvas({
   zoom = 1,
   onZoomChange,
   resetKey = 0,
-  partVisibility = DEFAULT_PART_VISIBILITY,
+  partVisibility,
 }: {
   autoRotate?: boolean;
   zoom?: number;
   onZoomChange?: (zoom: number) => void;
   resetKey?: number;
-  partVisibility?: PartVisibility;
+  partVisibility: PartVisibility;
 }) {
   return (
     <Canvas
       camera={{ position: [3 / zoom, 2 / zoom, 3 / zoom], fov: 45 }}
       frameloop="demand"
-      // 2Dキャンバスと同じ色で表示するため、R3F 既定のトーンマッピング（ACES）と
-      // sRGB 出力変換を無効化する。テクスチャ（NoColorSpace）のピクセル値がそのまま出力される
+      // 2Dキャンバスと同じ色で表示するため、R3F 既定のトーンマッピング（ACES）を無効化する
       flat
-      linear
     >
       <RenderController autoRotate={autoRotate} />
       <Scene autoRotate={autoRotate} zoom={zoom} onZoomChange={onZoomChange} resetKey={resetKey} partVisibility={partVisibility} />

@@ -7,6 +7,7 @@ import {
   drawCheckerboard,
   drawLayerHighlight,
   getPixelFromMouse,
+  CHECKER_COLORS,
 } from '@lib/skinRenderer';
 import { Button } from '@components/ui/button';
 import { ButtonGroup } from '@components/ui/button-group';
@@ -16,10 +17,10 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@components/ui/tooltip';
-import { Popover, PopoverContent, PopoverTrigger } from '@components/ui/popover';
 import { ZoomIn, ZoomOut, RotateCw, Grid3X3, Pipette } from 'lucide-react';
 import { ViewHint, type HintItem } from './ViewHint';
-import { CanvasBackgroundPicker, CanvasBackgroundSwatch, CHECKER_COLORS } from './CanvasBackgroundPicker';
+import { TOOLS } from './Toolbar';
+import { CanvasBackgroundMenu } from './CanvasBackgroundPicker';
 
 const DEFAULT_SCALE = 8;
 const MIN_SCALE = 4;
@@ -47,7 +48,6 @@ export function Canvas2D() {
   const highlightedLayerId = useEditorStore((state) => state.highlightedLayerId);
   const setPixel = useEditorStore((state) => state.setPixel);
   const setPixelRect = useEditorStore((state) => state.setPixelRect);
-  const setDrawingColor = useEditorStore((state) => state.setDrawingColor);
   const commitDrawing = useEditorStore((state) => state.commitDrawing);
   const modelType = useEditorStore((state) => state.modelType);
   const drawingColor = useEditorStore((state) => state.drawingColor);
@@ -55,27 +55,25 @@ export function Canvas2D() {
   const canvasBackground = useEditorStore((state) => state.canvasBackground);
   const layerColorPickTarget = useEditorStore((state) => state.layerColorPickTarget);
   const endLayerColorPick = useEditorStore((state) => state.endLayerColorPick);
-  const pickTargetLayerName = useEditorStore((state) =>
-    state.layerColorPickTarget ? state.layers.find((l) => l.id === state.layerColorPickTarget)?.name ?? null : null
-  );
+
+  // Only get layers when needed for highlight or active layer info (not for rendering)
+  const layers = useEditorStore((state) => state.layers);
+
+  // レイヤー基本色の取得中（対象レイヤーが存在する場合のみ）
+  const pickTargetLayerName = layerColorPickTarget
+    ? layers.find((l) => l.id === layerColorPickTarget)?.name ?? null
+    : null;
+  const isPickingLayerColor = pickTargetLayerName !== null;
 
   // 基本色の取得中は Esc でキャンセル（ダイアログに戻る）
   useEffect(() => {
-    if (!layerColorPickTarget) return;
+    if (!isPickingLayerColor) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') endLayerColorPick();
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [layerColorPickTarget, endLayerColorPick]);
-
-  // 対象レイヤーが削除された場合は取得モードを終了
-  useEffect(() => {
-    if (layerColorPickTarget && pickTargetLayerName === null) endLayerColorPick();
-  }, [layerColorPickTarget, pickTargetLayerName, endLayerColorPick]);
-
-  // Only get layers when needed for highlight or active layer info (not for rendering)
-  const layers = useEditorStore((state) => state.layers);
+  }, [isPickingLayerColor, endLayerColorPick]);
 
   // Get skin parts for current model type
   const skinParts = getSkinParts(modelType);
@@ -271,27 +269,12 @@ export function Canvas2D() {
       const pos = getPixelFromMouse(e.nativeEvent, canvas, scale);
       if (!pos) return;
 
-      // レイヤー設定の基本色をキャンバスから取得中
-      const pickTarget = useEditorStore.getState().layerColorPickTarget;
-      if (pickTarget) {
-        const pixel = useEditorStore.getState().getComposite()[pos.y][pos.x];
-        if (pixel.a > 0) {
-          useEditorStore.getState().updateLayerColor(pickTarget, { ...pixel });
-          useEditorStore.getState().saveToHistory();
-          // 取得したらレイヤー設定ダイアログに戻る
-          endLayerColorPick();
-        }
-        return;
-      }
-
       if (activeTool === 'eyedropper') {
-        // Pick color from composite
-        const composite = useEditorStore.getState().getComposite();
-        const pixel = composite[pos.y][pos.x];
+        // Pick color from composite（透明ピクセルならスポイトのまま）
+        const { getComposite, applyPickedColor } = useEditorStore.getState();
+        const pixel = getComposite()[pos.y][pos.x];
         if (pixel.a > 0) {
-          setDrawingColor(pixel);
-          // 色を取得したら元のツールに戻る（透明ピクセルならスポイトのまま）
-          useEditorStore.getState().restorePreviousTool();
+          applyPickedColor(pixel);
         }
         return;
       }
@@ -309,7 +292,7 @@ export function Canvas2D() {
       setPixel(pos.x, pos.y, color);
       drawPixelDirect(canvas, pos.x, pos.y, color);
     },
-    [activeTool, scale, setPixel, setDrawingColor, panOffset, getDrawColor, drawPixelDirect, endLayerColorPick]
+    [activeTool, scale, setPixel, panOffset, getDrawColor, drawPixelDirect]
   );
 
   const handleMouseMove = useCallback(
@@ -398,7 +381,6 @@ export function Canvas2D() {
   // Get cursor style
   const getCursor = () => {
     if (isPanning) return 'grabbing';
-    if (layerColorPickTarget) return 'crosshair';
     switch (activeTool) {
       case 'eyedropper':
         return 'crosshair';
@@ -494,24 +476,7 @@ export function Canvas2D() {
                 <p>パーツ領域の表示を切り替え</p>
               </TooltipContent>
             </Tooltip>
-            <Popover>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" size="sm" aria-label="背景">
-                      <CanvasBackgroundSwatch background={canvasBackground} className="mr-1 h-3 w-3" />
-                      背景
-                    </Button>
-                  </PopoverTrigger>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>キャンバスの背景を変更</p>
-                </TooltipContent>
-              </Tooltip>
-              <PopoverContent align="end" className="w-80">
-                <CanvasBackgroundPicker />
-              </PopoverContent>
-            </Popover>
+            <CanvasBackgroundMenu />
             <span className="tabular-nums text-xs text-muted-foreground">{scale}x</span>
           </div>
         </TooltipProvider>
@@ -555,7 +520,7 @@ export function Canvas2D() {
             )}
           </div>
         </div>
-        {layerColorPickTarget && (
+        {isPickingLayerColor && (
           <div className="absolute inset-x-2 top-2 z-20 flex justify-center">
             <div
               role="status"
@@ -571,7 +536,7 @@ export function Canvas2D() {
             </div>
           </div>
         )}
-        <ViewHint items={getHintItems(activeTool)} storageKey="skin-crafter:hint-2d" />
+        <ViewHint items={HINTS_BY_TOOL[activeTool]} storageKey="skin-crafter:hint-2d" />
       </div>
     </div>
   );
@@ -586,12 +551,14 @@ const TOOL_CLICK_HINTS: Record<ToolType, string> = {
   eyedropper: 'クリックで色を取得（取得後は元のツールに戻る）',
 };
 
-function getHintItems(tool: ToolType): HintItem[] {
-  return [
-    { keys: ['左クリック'], label: TOOL_CLICK_HINTS[tool] },
-    { keys: ['右ドラッグ'], label: 'キャンバスを移動' },
-    { keys: ['ホイール'], label: '拡大・縮小' },
-    { keys: ['Ctrl/⌘+Z', 'Ctrl/⌘+Y'], label: '元に戻す・やり直し' },
-    { keys: ['P', 'E', 'R', 'Shift+E', 'I'], label: 'ツール切替' },
-  ];
-}
+const COMMON_HINTS: HintItem[] = [
+  { keys: ['右ドラッグ'], label: 'キャンバスを移動' },
+  { keys: ['ホイール'], label: '拡大・縮小' },
+  { keys: ['Ctrl/⌘+Z', 'Ctrl/⌘+Y'], label: '元に戻す・やり直し' },
+  { keys: TOOLS.map((t) => t.shortcut), label: 'ツール切替' },
+];
+
+// ツールごとのヒント（再描画のたびに配列を作らないようモジュールレベルで用意）
+const HINTS_BY_TOOL = Object.fromEntries(
+  TOOLS.map((t) => [t.type, [{ keys: ['左クリック'], label: TOOL_CLICK_HINTS[t.type] }, ...COMMON_HINTS]])
+) as Record<ToolType, HintItem[]>;

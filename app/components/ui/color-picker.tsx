@@ -79,6 +79,50 @@ function hsvToRgb(h: number, s: number, v: number): { r: number; g: number; b: n
   };
 }
 
+const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+
+// 色エリア・スライダー共通のドラッグ処理。
+// onPoint にはコンテナ内の相対位置（0〜1）を渡す。
+// ドラッグ終了時に onEnd を呼ぶ（ドラッグ中にアンマウントされた場合も呼び、履歴の確定漏れを防ぐ）
+function usePointerDrag(onPoint: (x: number, y: number) => void, onEnd?: () => void) {
+  const ref = useRef<HTMLDivElement>(null);
+  const isDragging = useRef(false);
+  const onEndRef = useRef(onEnd);
+  useEffect(() => {
+    onEndRef.current = onEnd;
+  });
+  useEffect(() => () => {
+    if (isDragging.current) onEndRef.current?.();
+  }, []);
+
+  const emit = (e: React.PointerEvent) => {
+    const rect = ref.current?.getBoundingClientRect();
+    if (!rect) return;
+    onPoint(clamp01((e.clientX - rect.left) / rect.width), clamp01((e.clientY - rect.top) / rect.height));
+  };
+
+  const end = (e: React.PointerEvent) => {
+    if (!isDragging.current) return;
+    isDragging.current = false;
+    ref.current?.releasePointerCapture(e.pointerId);
+    onEndRef.current?.();
+  };
+
+  return {
+    ref,
+    onPointerDown: (e: React.PointerEvent) => {
+      isDragging.current = true;
+      ref.current?.setPointerCapture(e.pointerId);
+      emit(e);
+    },
+    onPointerMove: (e: React.PointerEvent) => {
+      if (isDragging.current) emit(e);
+    },
+    onPointerUp: end,
+    onPointerCancel: end,
+  };
+}
+
 // Saturation-Value picker (2D gradient)
 function SaturationValuePicker({
   hue,
@@ -93,44 +137,12 @@ function SaturationValuePicker({
   onChange: (s: number, v: number) => void;
   onChangeEnd?: () => void;
 }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const isDragging = useRef(false);
-
-  const handlePointerEvent = useCallback(
-    (e: React.PointerEvent | PointerEvent) => {
-      if (!containerRef.current) return;
-      const rect = containerRef.current.getBoundingClientRect();
-      const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-      const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
-      onChange(x * 100, (1 - y) * 100);
-    },
-    [onChange]
-  );
-
-  const handlePointerDown = (e: React.PointerEvent) => {
-    isDragging.current = true;
-    containerRef.current?.setPointerCapture(e.pointerId);
-    handlePointerEvent(e);
-  };
-
-  const handlePointerMove = (e: React.PointerEvent) => {
-    if (isDragging.current) {
-      handlePointerEvent(e);
-    }
-  };
-
-  const handlePointerUp = (e: React.PointerEvent) => {
-    const wasDragging = isDragging.current;
-    isDragging.current = false;
-    containerRef.current?.releasePointerCapture(e.pointerId);
-    if (wasDragging) onChangeEnd?.();
-  };
-
+  const drag = usePointerDrag((x, y) => onChange(x * 100, (1 - y) * 100), onChangeEnd);
   const hueColor = `hsl(${hue}, 100%, 50%)`;
 
   return (
     <div
-      ref={containerRef}
+      {...drag}
       className="relative h-32 w-full cursor-crosshair rounded border border-border"
       style={{
         background: `
@@ -138,10 +150,6 @@ function SaturationValuePicker({
           linear-gradient(to right, #fff, ${hueColor})
         `,
       }}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onPointerCancel={handlePointerUp}
     >
       <div
         className="pointer-events-none absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow-[0_0_0_1px_rgba(0,0,0,0.3)]"
@@ -164,49 +172,15 @@ function HueSlider({
   onChange: (h: number) => void;
   onChangeEnd?: () => void;
 }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const isDragging = useRef(false);
-
-  const handlePointerEvent = useCallback(
-    (e: React.PointerEvent | PointerEvent) => {
-      if (!containerRef.current) return;
-      const rect = containerRef.current.getBoundingClientRect();
-      const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-      onChange(x * 360);
-    },
-    [onChange]
-  );
-
-  const handlePointerDown = (e: React.PointerEvent) => {
-    isDragging.current = true;
-    containerRef.current?.setPointerCapture(e.pointerId);
-    handlePointerEvent(e);
-  };
-
-  const handlePointerMove = (e: React.PointerEvent) => {
-    if (isDragging.current) {
-      handlePointerEvent(e);
-    }
-  };
-
-  const handlePointerUp = (e: React.PointerEvent) => {
-    const wasDragging = isDragging.current;
-    isDragging.current = false;
-    containerRef.current?.releasePointerCapture(e.pointerId);
-    if (wasDragging) onChangeEnd?.();
-  };
+  const drag = usePointerDrag((x) => onChange(x * 360), onChangeEnd);
 
   return (
     <div
-      ref={containerRef}
+      {...drag}
       className="relative h-4 w-full cursor-pointer rounded border border-border"
       style={{
         background: 'linear-gradient(to right, #f00 0%, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00 100%)',
       }}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onPointerCancel={handlePointerUp}
     >
       <div
         className="pointer-events-none absolute top-1/2 h-5 w-2 -translate-x-1/2 -translate-y-1/2 rounded-sm border border-white shadow-[0_0_0_1px_rgba(0,0,0,0.3)]"
@@ -231,43 +205,12 @@ function AlphaSlider({
   onChange: (a: number) => void;
   onChangeEnd?: () => void;
 }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const isDragging = useRef(false);
-
-  const handlePointerEvent = useCallback(
-    (e: React.PointerEvent | PointerEvent) => {
-      if (!containerRef.current) return;
-      const rect = containerRef.current.getBoundingClientRect();
-      const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-      onChange(Math.round(x * 255));
-    },
-    [onChange]
-  );
-
-  const handlePointerDown = (e: React.PointerEvent) => {
-    isDragging.current = true;
-    containerRef.current?.setPointerCapture(e.pointerId);
-    handlePointerEvent(e);
-  };
-
-  const handlePointerMove = (e: React.PointerEvent) => {
-    if (isDragging.current) {
-      handlePointerEvent(e);
-    }
-  };
-
-  const handlePointerUp = (e: React.PointerEvent) => {
-    const wasDragging = isDragging.current;
-    isDragging.current = false;
-    containerRef.current?.releasePointerCapture(e.pointerId);
-    if (wasDragging) onChangeEnd?.();
-  };
-
+  const drag = usePointerDrag((x) => onChange(Math.round(x * 255)), onChangeEnd);
   const rgbStr = `${color.r}, ${color.g}, ${color.b}`;
 
   return (
     <div
-      ref={containerRef}
+      {...drag}
       className="relative h-4 w-full cursor-pointer rounded border border-border"
       style={{
         background: `
@@ -275,10 +218,6 @@ function AlphaSlider({
           repeating-conic-gradient(#808080 0% 25%, #fff 0% 50%) 50% / 8px 8px
         `,
       }}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onPointerCancel={handlePointerUp}
     >
       <div
         className="pointer-events-none absolute top-1/2 h-5 w-2 -translate-x-1/2 -translate-y-1/2 rounded-sm border border-white shadow-[0_0_0_1px_rgba(0,0,0,0.3)]"
@@ -299,7 +238,10 @@ function ColorPalette({
   onSelectColor: (color: RGBA) => void;
   currentColor: RGBA;
 }) {
-  const { palette, addToPalette, removeFromPalette, renamePaletteColor } = useEditorStore();
+  const palette = useEditorStore((state) => state.palette);
+  const addToPalette = useEditorStore((state) => state.addToPalette);
+  const removeFromPalette = useEditorStore((state) => state.removeFromPalette);
+  const renamePaletteColor = useEditorStore((state) => state.renamePaletteColor);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   // 名前を編集中のパレット色
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -315,7 +257,7 @@ function ColorPalette({
     if (!editingId) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && document.activeElement === nameInputRef.current) {
-        e.stopPropagation();
+        // Radix は defaultPrevented な Esc では閉じない
         e.preventDefault();
         setEditingId(null);
       }
@@ -324,9 +266,9 @@ function ColorPalette({
     return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [editingId]);
 
-  const startEditing = (p: PaletteColor) => {
-    setEditingId(p.id);
-    setNameInput(p.name ?? '');
+  const startEditing = (id: string, name = '') => {
+    setEditingId(id);
+    setNameInput(name);
   };
 
   const commitName = () => {
@@ -337,10 +279,8 @@ function ColorPalette({
   };
 
   const handleAddCurrentColor = () => {
-    const id = addToPalette(currentColor);
     // 追加直後に名前を入力できるようにする（空のままでも可）
-    setEditingId(id);
-    setNameInput('');
+    startEditing(addToPalette(currentColor));
   };
 
   const isSameColor = (c1: RGBA, c2: RGBA) =>
@@ -374,7 +314,9 @@ function ColorPalette({
           </p>
         ) : (
           <div className="flex flex-wrap gap-1">
-            {palette.map((p) => (
+            {palette.map((p) => {
+              const hex = rgbaToHex(p.color);
+              return (
               <div
                 key={p.id}
                 className="relative"
@@ -391,20 +333,17 @@ function ColorPalette({
                             ? 'border-primary ring-1 ring-primary'
                             : 'border-border hover:border-foreground/50'
                       }`}
-                      style={{ backgroundColor: rgbaToHex(p.color) }}
-                      aria-label={p.name ? `${p.name}（${rgbaToHex(p.color)}）` : rgbaToHex(p.color)}
+                      style={{ backgroundColor: hex }}
+                      aria-label={p.name ? `${p.name}（${hex}）` : hex}
                       onClick={() => onSelectColor(p.color)}
-                      onDoubleClick={() => startEditing(p)}
+                      onDoubleClick={() => startEditing(p.id, p.name)}
                     />
                   </TooltipTrigger>
                   <TooltipContent>
-                    {p.name ? (
-                      <p>
-                        {p.name} <span className="opacity-70">{rgbaToHex(p.color)}</span>
-                      </p>
-                    ) : (
-                      <p>{rgbaToHex(p.color)}</p>
-                    )}
+                    <p>
+                      {p.name && <>{p.name} </>}
+                      <span className={p.name ? 'opacity-70' : undefined}>{hex}</span>
+                    </p>
                   </TooltipContent>
                 </Tooltip>
                 {hoveredId === p.id && (
@@ -414,7 +353,6 @@ function ColorPalette({
                       aria-label="パレットから削除"
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (editingId === p.id) setEditingId(null);
                         removeFromPalette(p.id);
                       }}
                     >
@@ -425,7 +363,7 @@ function ColorPalette({
                       aria-label="名前を編集"
                       onClick={(e) => {
                         e.stopPropagation();
-                        startEditing(p);
+                        startEditing(p.id, p.name);
                       }}
                     >
                       <Pencil className="h-2 w-2" />
@@ -433,7 +371,8 @@ function ColorPalette({
                   </>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
