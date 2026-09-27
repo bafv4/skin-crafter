@@ -228,6 +228,21 @@ function cloneLayerGroups(groups: LayerGroup[]): LayerGroup[] {
   return groups.map((group) => ({ ...group }));
 }
 
+// 履歴の「更新」を適用する: from → to で変わった項目だけを to の値にし、それ以外は現在の値を保つ。
+// 名前・不透明度など履歴に記録されない変更を、元に戻す・やり直しで巻き戻さないため
+function applyChangedFields<T extends object>(current: T, from: T, to: T, skip: readonly (keyof T)[] = []): T {
+  const result = { ...current };
+  const keys = new Set([...Object.keys(from), ...Object.keys(to)] as (keyof T)[]);
+  for (const key of keys) {
+    if (skip.includes(key)) continue;
+    const next = to[key];
+    if (JSON.stringify(from[key]) !== JSON.stringify(next)) {
+      result[key] = (next !== null && typeof next === 'object' ? { ...next } : next) as T[keyof T];
+    }
+  }
+  return result;
+}
+
 // getComposite のキャッシュ（compositeCache）を計算したときのレイヤー・グループ
 let compositeSource: { layers: Layer[]; layerGroups: LayerGroup[] } | null = null;
 
@@ -1368,14 +1383,13 @@ export const useEditorStore = create<EditorState>()(
         layerMap.set(change.layerId, cloneLayer(change.oldLayer));
         engine.createLayer(change.layerId, change.oldLayer.order);
         engine.setLayerData(change.layerId, change.oldLayer.order, layerPixelsToUint8(change.oldLayer.pixels));
-      } else if (change.type === 'update' && change.oldLayer) {
+      } else if (change.type === 'update' && change.oldLayer && change.newLayer) {
         const existing = layerMap.get(change.layerId);
         if (existing) {
-          // Preserve current pixels, restore metadata
-          const oldLayer = cloneLayer(change.oldLayer);
-          oldLayer.pixels = existing.pixels;
-          layerMap.set(change.layerId, oldLayer);
-          engine.setLayerOrder(change.layerId, change.oldLayer.order);
+          // ピクセルは pixelChanges で戻すので、この履歴で変わった設定だけを戻す
+          const restored = applyChangedFields(existing, change.newLayer, change.oldLayer, ['pixels']);
+          layerMap.set(change.layerId, restored);
+          if (restored.order !== existing.order) engine.setLayerOrder(change.layerId, restored.order);
         }
       }
     }
@@ -1387,8 +1401,9 @@ export const useEditorStore = create<EditorState>()(
         newLayerGroups = newLayerGroups.filter(g => g.id !== change.groupId);
       } else if (change.type === 'remove' && change.oldGroup) {
         newLayerGroups.push({ ...change.oldGroup });
-      } else if (change.type === 'update' && change.oldGroup) {
-        newLayerGroups = newLayerGroups.map(g => g.id === change.groupId ? { ...change.oldGroup! } : g);
+      } else if (change.type === 'update' && change.oldGroup && change.newGroup) {
+        const { oldGroup, newGroup } = change;
+        newLayerGroups = newLayerGroups.map(g => g.id === change.groupId ? applyChangedFields(g, newGroup, oldGroup) : g);
       }
     }
 
@@ -1435,13 +1450,12 @@ export const useEditorStore = create<EditorState>()(
       } else if (change.type === 'remove') {
         layerMap.delete(change.layerId);
         engine.deleteLayer(change.layerId);
-      } else if (change.type === 'update' && change.newLayer) {
+      } else if (change.type === 'update' && change.oldLayer && change.newLayer) {
         const existing = layerMap.get(change.layerId);
         if (existing) {
-          const newLayer = cloneLayer(change.newLayer);
-          newLayer.pixels = existing.pixels;
-          layerMap.set(change.layerId, newLayer);
-          engine.setLayerOrder(change.layerId, change.newLayer.order);
+          const reapplied = applyChangedFields(existing, change.oldLayer, change.newLayer, ['pixels']);
+          layerMap.set(change.layerId, reapplied);
+          if (reapplied.order !== existing.order) engine.setLayerOrder(change.layerId, reapplied.order);
         }
       }
     }
@@ -1453,8 +1467,9 @@ export const useEditorStore = create<EditorState>()(
         newLayerGroups.push({ ...change.newGroup });
       } else if (change.type === 'remove') {
         newLayerGroups = newLayerGroups.filter(g => g.id !== change.groupId);
-      } else if (change.type === 'update' && change.newGroup) {
-        newLayerGroups = newLayerGroups.map(g => g.id === change.groupId ? { ...change.newGroup! } : g);
+      } else if (change.type === 'update' && change.oldGroup && change.newGroup) {
+        const { oldGroup, newGroup } = change;
+        newLayerGroups = newLayerGroups.map(g => g.id === change.groupId ? applyChangedFields(g, oldGroup, newGroup) : g);
       }
     }
 

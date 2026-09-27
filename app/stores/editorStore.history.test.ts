@@ -1369,3 +1369,71 @@ describe('レイヤー構造を変える操作の undo / redo', () => {
     expect(getLayer(a).name).toBe('新しい名前');
   });
 });
+
+// ================================================================
+// 更新の undo / redo は、その履歴で変わった項目だけを戻す
+// ================================================================
+describe('更新の undo / redo と、履歴に記録されない変更', () => {
+  it('基本色の変更を undo / redo しても、その後の名前・不透明度・表示・グループの変更は巻き戻らない', () => {
+    const id = s().createLayer('元の名前', RED, 'singleColor');
+    stroke([[8, 8]], RED);
+    s().updateLayerColor(id, BLUE);
+    s().saveToHistory();
+
+    // 履歴に記録されない変更
+    const group = s().createLayerGroup('グループ');
+    s().updateLayerName(id, '新しい名前');
+    s().updateLayerOpacity(id, 40);
+    s().toggleLayerVisibility(id);
+    s().moveLayerToGroup(id, group);
+    const moved = getLayer(id);
+
+    s().undo();
+    expect(getLayer(id).baseColor).toEqual(RED);
+    expect(px(id, 8, 8)).toEqual(RED);
+    expect(getLayer(id)).toMatchObject({
+      name: '新しい名前',
+      opacity: 40,
+      visible: false,
+      groupId: group,
+      order: moved.order,
+    });
+
+    s().redo();
+    expect(getLayer(id).baseColor).toEqual(BLUE);
+    expect(px(id, 8, 8)).toEqual(BLUE);
+    expect(getLayer(id)).toMatchObject({
+      name: '新しい名前',
+      opacity: 40,
+      visible: false,
+      groupId: group,
+      order: moved.order,
+    });
+  });
+
+  it('グループの更新を undo / redo しても、その履歴で変わっていない項目は現在の値のまま', () => {
+    useEditorStore.setState({
+      layerGroups: [makeGroup({ id: 'g', name: '現在の名前', collapsed: true, visible: false, order: 0 })],
+    });
+    setHistory([
+      {
+        pixelChanges: [],
+        layerChanges: [],
+        layerGroupChanges: [
+          {
+            type: 'update',
+            groupId: 'g',
+            oldGroup: makeGroup({ id: 'g', name: '記録時の名前', collapsed: false, visible: true, order: 0 }),
+            newGroup: makeGroup({ id: 'g', name: '記録時の名前', collapsed: true, visible: true, order: 0 }),
+          },
+        ],
+      },
+    ]);
+
+    s().undo();
+    expect(s().layerGroups[0]).toMatchObject({ name: '現在の名前', collapsed: false, visible: false });
+
+    s().redo();
+    expect(s().layerGroups[0]).toMatchObject({ name: '現在の名前', collapsed: true, visible: false });
+  });
+});
