@@ -1365,10 +1365,9 @@ describe('splitLayerBySelection', () => {
       opacity: 70,
       visible: true,
       noiseSettings: { brightness: 12, hue: 4 },
-      order: 3,
     });
-    // 元レイヤーは 1 つ後ろへ。別グループのレイヤーは動かない
-    expect(result.layers.find((l) => l.id === 'src')!.order).toBe(4);
+    // 新レイヤーは元レイヤーのすぐ手前（同じグループ内の順番が 1 つ小さい）。別グループのレイヤーは動かない
+    expect(result.layers.find((l) => l.id === 'src')!.order).toBe(newLayer.order + 1);
     expect(result.layers.find((l) => l.id === 'other')!.order).toBe(5);
   });
 
@@ -1665,6 +1664,53 @@ describe('分割の前後で合成結果・グループ・表示状態が保た�
     expect(pieces).toHaveLength(2);
     expect(pieces.every((l) => l.visible === false)).toBe(true);
     expect(computeLayerComposite(result.layers, groups)).toEqual(before);
+  });
+
+  it('同じグループに order が同じレイヤーがあっても、分割で合成結果は変わらない', () => {
+    // A と B は同じ order。配列で後ろの B が手前に描かれる
+    const a = makeLayer({ id: 'A', order: 0, pixels: pixelsWith([[0, 0, RED], [1, 0, GREEN]]) });
+    const b = makeLayer({ id: 'B', order: 0, pixels: pixelsWith([[0, 0, BLUE], [1, 0, BLUE]]) });
+    const layers = [a, b];
+    const before = computeLayerComposite(layers, []);
+    expect(before[0][0]).toEqual(BLUE);
+
+    const bySelection = splitLayerBySelection(layers, 'A', [{ x: 0, y: 0 }]);
+    expect(computeLayerComposite(bySelection.layers, [])).toEqual(before);
+
+    const byColor = splitLayerByColor(layers, 'A', 30, false);
+    expect(byColor.layers.length).toBeGreaterThan(2);
+    expect(computeLayerComposite(byColor.layers, [])).toEqual(before);
+
+    // 分割後は order が重複しない
+    for (const result of [bySelection.layers, byColor.layers]) {
+      const orders = result.map((l) => l.order);
+      expect(new Set(orders).size).toBe(orders.length);
+    }
+  });
+
+  it('ランダムな重なり（order の重複・グループを含む）で、分割しても合成結果は変わらない', () => {
+    for (let seed = 1; seed <= 30; seed++) {
+      const rand = lcg(seed);
+      const int = (n: number) => Math.floor(rand() * n);
+      const groups = [
+        { id: 'g1', name: 'g1', collapsed: false, order: 0, visible: true },
+        { id: 'g2', name: 'g2', collapsed: false, order: 1, visible: true },
+      ];
+      const palette = [RED, GREEN, BLUE];
+      const layers = Array.from({ length: 5 }, (_, i) => {
+        const entries: Array<[number, number, RGBA]> = [];
+        for (let k = 0; k < 20; k++) entries.push([8 + int(6), 8 + int(4), palette[int(3)]]);
+        return makeLayer({ id: `L${i}`, order: int(3), groupId: [null, 'g1', 'g2'][int(3)], pixels: pixelsWith(entries) });
+      });
+      const before = computeLayerComposite(layers, groups);
+      const target = `L${int(5)}`;
+
+      const bySelection = splitLayerBySelection(layers, target, [{ x: 8 + int(6), y: 8 + int(4) }, { x: 8 + int(6), y: 8 + int(4) }]);
+      expect(computeLayerComposite(bySelection.layers, groups), `seed ${seed} selection`).toEqual(before);
+
+      const byColor = splitLayerByColor(layers, target, 15, false);
+      expect(computeLayerComposite(byColor.layers, groups), `seed ${seed} color`).toEqual(before);
+    }
   });
 
   it('選択範囲で分割しても合成結果は変わらない（非表示のレイヤーからの分割も非表示のまま）', () => {

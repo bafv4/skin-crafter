@@ -581,6 +581,16 @@ export function mergeLayers(
   return { layers: newLayers };
 }
 
+// 同じグループ（またはグループなし）のレイヤーの、実際の描画順での順位（手前が 0）。
+// order が同じレイヤーは、合成と同じく配列の後ろにある方が手前
+function drawRanksInBucket(layers: Layer[], groupId: string | null): Map<string, number> {
+  const bucket = layers
+    .map((l, index) => ({ l, index }))
+    .filter(({ l }) => l.groupId === groupId);
+  bucket.sort((a, b) => a.l.order - b.l.order || b.index - a.index);
+  return new Map(bucket.map(({ l }, rank) => [l.id, rank]));
+}
+
 /**
  * Split a layer by re-analyzing color similarity within the layer.
  * Returns multiple new layers based on color clusters.
@@ -676,15 +686,21 @@ export function splitLayerByColor(
     : { brightness: 0, hue: 0 };
 
   // 分割後のレイヤーは元のレイヤーと同じ重なり位置に並べる（見た目を変えないため）。
-  // 同じグループで元のレイヤーより奥のレイヤーを、増える枚数分だけ後ろへずらす
+  // 同じグループのレイヤーの order を描画順どおりの連番に振り直したうえで、
+  // 元のレイヤーより奥のレイヤーを、増える枚数分だけ後ろへずらす
+  const ranks = drawRanksInBucket(layers, layer.groupId);
+  const targetRank = ranks.get(layerId)!;
   const shift = components.size - 1;
   const newLayers: Layer[] = layers
     .filter(l => l.id !== layerId)
-    .map(l => ({
-      ...l,
-      order: l.groupId === layer.groupId && l.order > layer.order ? l.order + shift : l.order,
-      pixels: cloneLayerPixels(l.pixels),
-    }));
+    .map(l => {
+      const rank = ranks.get(l.id);
+      return {
+        ...l,
+        order: rank === undefined ? l.order : rank > targetRank ? rank + shift : rank,
+        pixels: cloneLayerPixels(l.pixels),
+      };
+    });
 
   let subIndex = 1;
   for (const [, componentPixels] of components) {
@@ -714,7 +730,7 @@ export function splitLayerByColor(
       baseColor: avgColor,
       noiseSettings: { ...noiseSettings },
       groupId: layer.groupId,
-      order: layer.order + subIndex - 1,
+      order: targetRank + subIndex - 1,
       layerType: layer.layerType,
       visible: layer.visible,
       opacity: layer.opacity ?? 100,
@@ -781,7 +797,10 @@ export function splitLayerBySelection(
   }
 
   // 新しいレイヤーは元のレイヤーのすぐ手前（同じ重なり位置）に置き、見た目を変えない。
-  // 同じグループで元のレイヤー以降（元のレイヤーを含む）を 1 つ後ろへずらす
+  // 同じグループのレイヤーの order を描画順どおりの連番に振り直したうえで、
+  // 元のレイヤー以降（元のレイヤーを含む）を 1 つ後ろへずらす
+  const ranks = drawRanksInBucket(layers, layer.groupId);
+  const targetRank = ranks.get(layerId)!;
   const newLayerId = generateId();
   const newLayer: Layer = {
     id: newLayerId,
@@ -789,7 +808,7 @@ export function splitLayerBySelection(
     baseColor: avgColor,
     noiseSettings: { ...layer.noiseSettings },
     groupId: layer.groupId,
-    order: layer.order,
+    order: targetRank,
     layerType: layer.layerType,
     visible: layer.visible,
     opacity: layer.opacity ?? 100,
@@ -799,7 +818,8 @@ export function splitLayerBySelection(
   // Create new layers array, removing selected pixels from source layer
   const newLayers: Layer[] = [];
   for (const l of layers) {
-    const order = l.groupId === layer.groupId && l.order >= layer.order ? l.order + 1 : l.order;
+    const rank = ranks.get(l.id);
+    const order = rank === undefined ? l.order : rank >= targetRank ? rank + 1 : rank;
     if (l.id === layerId) {
       // Clone source layer and remove selected pixels
       const clonedPixels = cloneLayerPixels(l.pixels);
