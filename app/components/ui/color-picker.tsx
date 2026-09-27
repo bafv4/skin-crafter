@@ -291,6 +291,23 @@ function ColorPalette({
   const [nameInput, setNameInput] = useState('');
 
   const editingColor = palette.find((p) => p.id === editingId) ?? null;
+  const nameInputRef = useRef<HTMLInputElement>(null);
+
+  // 名前入力中の Esc は入力のキャンセルだけにする。
+  // Radix の Popover/Dialog は document のキャプチャフェーズで Esc を拾って閉じてしまうため、
+  // それより先に走る window のキャプチャフェーズで止める
+  useEffect(() => {
+    if (!editingId) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && document.activeElement === nameInputRef.current) {
+        e.stopPropagation();
+        e.preventDefault();
+        setEditingId(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [editingId]);
 
   const startEditing = (p: PaletteColor) => {
     setEditingId(p.id);
@@ -413,6 +430,7 @@ function ColorPalette({
               style={{ backgroundColor: rgbaToHex(editingColor.color) }}
             />
             <Input
+              ref={nameInputRef}
               autoFocus
               value={nameInput}
               onChange={(e) => setNameInput(e.target.value)}
@@ -420,11 +438,6 @@ function ColorPalette({
                 if (e.key === 'Enter') {
                   e.preventDefault();
                   commitName();
-                } else if (e.key === 'Escape') {
-                  // ポップオーバーごと閉じないようにする
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setEditingId(null);
                 }
               }}
               onBlur={commitName}
