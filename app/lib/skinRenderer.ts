@@ -82,7 +82,7 @@ export function renderSkinToCanvas(
 }
 
 // Grid cache for avoiding re-rendering
-let gridCache: { scale: number; canvas: HTMLCanvasElement } | null = null;
+let gridCache: { scale: number; color: string; canvas: HTMLCanvasElement } | null = null;
 
 // Draw grid overlay with caching
 export function drawGrid(
@@ -94,7 +94,7 @@ export function drawGrid(
   const height = SKIN_HEIGHT * scale;
 
   // Check cache
-  if (gridCache && gridCache.scale === scale) {
+  if (gridCache && gridCache.scale === scale && gridCache.color === color) {
     ctx.drawImage(gridCache.canvas, 0, 0);
     return;
   }
@@ -114,7 +114,7 @@ export function drawGrid(
   drawGridDirect(cacheCtx, scale, color);
 
   // Store in cache
-  gridCache = { scale, canvas: cacheCanvas };
+  gridCache = { scale, color, canvas: cacheCanvas };
 
   // Draw to target context
   ctx.drawImage(cacheCanvas, 0, 0);

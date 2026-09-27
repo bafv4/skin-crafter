@@ -873,6 +873,17 @@ describe('drawGrid', () => {
       expect([canvases[1].width, canvases[1].height]).toEqual([SKIN_WIDTH * 16, SKIN_HEIGHT * 16]);
       expect(strokedSegments(after).map(segmentKey).sort()).toEqual(expectedGridKeys(16));
     });
+
+    it('色を変えると新しい色で引き直す（同じ scale でも前の色のキャッシュを使わない）', () => {
+      const red = new FakeContext2D();
+      const blue = new FakeContext2D();
+
+      renderer.drawGrid(red.asCtx(), 8, 'red');
+      renderer.drawGrid(blue.asCtx(), 8, 'blue');
+
+      expect(canvases).toHaveLength(2);
+      expect(new Set(strokedSegments(blue).map((seg) => seg.color))).toEqual(new Set(['blue']));
+    });
   });
 });
 
