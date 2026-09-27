@@ -253,15 +253,30 @@ function withoutMissingGroups(layers: Layer[], layerGroups: LayerGroup[]): Layer
   return layers.map((l) => (l.groupId && !groupIds.has(l.groupId) ? { ...l, groupId: null } : l));
 }
 
+// 元に戻す・やり直しの後に選択するレイヤー: 履歴に記録した選択が存在すればそれ、
+// なければ現在の選択（存在すれば）、どちらもなければ未選択
+function pickActiveLayerId(
+  recorded: string | null | undefined,
+  current: string | null,
+  layers: Layer[]
+): string | null {
+  const exists = (id: string | null | undefined): id is string => !!id && layers.some((l) => l.id === id);
+  if (exists(recorded)) return recorded;
+  if (exists(current)) return current;
+  return null;
+}
+
 // getComposite のキャッシュ（compositeCache）を計算したときのレイヤー・グループ
 let compositeSource: { layers: Layer[]; layerGroups: LayerGroup[] } | null = null;
 
 // Snapshot of state before changes (for diff calculation)
 let snapshotLayers: Layer[] | null = null;
 let snapshotLayerGroups: LayerGroup[] | null = null;
+let snapshotActiveLayerId: string | null = null;
 
 // Take a snapshot of current state before making changes
-function takeSnapshot(layers: Layer[], layerGroups: LayerGroup[]) {
+function takeSnapshot(layers: Layer[], layerGroups: LayerGroup[], activeLayerId: string | null) {
+  snapshotActiveLayerId = activeLayerId;
   snapshotLayers = cloneLayers(layers);
   snapshotLayerGroups = cloneLayerGroups(layerGroups);
 }
@@ -371,6 +386,7 @@ function calculateDiff(
 function clearSnapshot() {
   snapshotLayers = null;
   snapshotLayerGroups = null;
+  snapshotActiveLayerId = null;
 }
 
 // Noise direction type
@@ -903,7 +919,7 @@ export const useEditorStore = create<EditorState>()(
 
     // Take snapshot if this is the first change in a drawing session
     if (!snapshotLayers) {
-      takeSnapshot(updatedState.layers, layerGroups);
+      takeSnapshot(updatedState.layers, layerGroups, updatedState.activeLayerId);
     }
 
     // Directly mutate the pixel array for performance
@@ -939,7 +955,7 @@ export const useEditorStore = create<EditorState>()(
     if (layerIndex === -1) return;
 
     // Take snapshot before making changes
-    takeSnapshot(updatedState.layers, layerGroups);
+    takeSnapshot(updatedState.layers, layerGroups, updatedState.activeLayerId);
 
     const layer = updatedState.layers[layerIndex];
     const layerPixels = layer.pixels;
@@ -1068,7 +1084,7 @@ export const useEditorStore = create<EditorState>()(
     // 一連の色変更（ドラッグ中など）の最初だけスナップショットを取り、
     // 操作完了時に呼び出し側が saveToHistory() で 1 件の履歴として確定する
     if (!snapshotLayers) {
-      takeSnapshot(layers, layerGroups);
+      takeSnapshot(layers, layerGroups, get().activeLayerId);
     }
 
     const layer = layers[layerIndex];
@@ -1232,7 +1248,7 @@ export const useEditorStore = create<EditorState>()(
     const layer = layers.find((l) => l.id === layerId);
     if (!layer) return null;
 
-    takeSnapshot(layers, layerGroups);
+    takeSnapshot(layers, layerGroups, get().activeLayerId);
 
     const newId = generateId();
     const maxOrder = layers.length > 0 ? Math.max(...layers.map(l => l.order)) : -1;
@@ -1357,14 +1373,17 @@ export const useEditorStore = create<EditorState>()(
 
   // History actions
   saveToHistory: () => {
-    const { layers, layerGroups, history, historyIndex } = get();
+    const { layers, layerGroups, history, historyIndex, activeLayerId } = get();
 
     const diff = calculateDiff(layers, layerGroups);
+    const activeLayerIdBefore = snapshotActiveLayerId;
     clearSnapshot();
 
     if (!diff) {
       return;
     }
+    diff.activeLayerIdBefore = activeLayerIdBefore;
+    diff.activeLayerIdAfter = activeLayerId;
 
     const newHistory = history.slice(0, historyIndex + 1);
     newHistory.push(diff);
@@ -1436,9 +1455,11 @@ export const useEditorStore = create<EditorState>()(
       }
     }
 
+    const restoredLayers = withoutMissingGroups(Array.from(layerMap.values()), newLayerGroups);
     set((state) => ({
-      layers: withoutMissingGroups(Array.from(layerMap.values()), newLayerGroups),
+      layers: restoredLayers,
       layerGroups: newLayerGroups,
+      activeLayerId: pickActiveLayerId(entry.activeLayerIdBefore, state.activeLayerId, restoredLayers),
       historyIndex: historyIndex - 1,
       compositeCache: null,
       previewVersion: state.previewVersion + 1,
@@ -1502,9 +1523,11 @@ export const useEditorStore = create<EditorState>()(
       }
     }
 
+    const restoredLayers = withoutMissingGroups(Array.from(layerMap.values()), newLayerGroups);
     set((state) => ({
-      layers: withoutMissingGroups(Array.from(layerMap.values()), newLayerGroups),
+      layers: restoredLayers,
       layerGroups: newLayerGroups,
+      activeLayerId: pickActiveLayerId(entry.activeLayerIdAfter, state.activeLayerId, restoredLayers),
       historyIndex: newIndex,
       compositeCache: null,
       previewVersion: state.previewVersion + 1,
@@ -1514,7 +1537,7 @@ export const useEditorStore = create<EditorState>()(
   // File actions
   loadFromImageData: (imageData) => {
     const { layers, layerGroups, saveToHistory } = get();
-    takeSnapshot(layers, layerGroups);
+    takeSnapshot(layers, layerGroups, get().activeLayerId);
 
     // Clear all layers in PixelEngine first
     const engine = getPixelEngine();
@@ -1597,7 +1620,7 @@ export const useEditorStore = create<EditorState>()(
 
   generateLayers: (options = {}) => {
     const { layers, layerGroups, saveToHistory } = get();
-    takeSnapshot(layers, layerGroups);
+    takeSnapshot(layers, layerGroups, get().activeLayerId);
     const { threshold = 'normal', thresholdValue: customThreshold, applyNoise = true } = options;
     const finalThreshold = customThreshold ?? COLOR_THRESHOLD_PRESETS[threshold];
 
@@ -1641,7 +1664,7 @@ export const useEditorStore = create<EditorState>()(
 
   mergeLayersById: (sourceLayerId, targetLayerId) => {
     const { layers, layerGroups, saveToHistory } = get();
-    takeSnapshot(layers, layerGroups);
+    takeSnapshot(layers, layerGroups, get().activeLayerId);
 
     const { layers: newLayers } = mergeLayers(
       layers,
@@ -1670,7 +1693,7 @@ export const useEditorStore = create<EditorState>()(
 
   mergeSimilarLayersAction: (options = {}) => {
     const { layers, layerGroups, saveToHistory } = get();
-    takeSnapshot(layers, layerGroups);
+    takeSnapshot(layers, layerGroups, get().activeLayerId);
     const { threshold = 'normal', thresholdValue: customThreshold, applyNoise = true } = options;
     const finalThreshold = customThreshold ?? COLOR_THRESHOLD_PRESETS[threshold];
 
@@ -1701,7 +1724,7 @@ export const useEditorStore = create<EditorState>()(
 
   splitLayerByColorAction: (layerId, options = {}) => {
     const { layers, layerGroups, saveToHistory } = get();
-    takeSnapshot(layers, layerGroups);
+    takeSnapshot(layers, layerGroups, get().activeLayerId);
     const { threshold = 'strict', thresholdValue: customThreshold, applyNoise = false } = options;
     const finalThreshold = customThreshold ?? COLOR_THRESHOLD_PRESETS[threshold];
 
@@ -1731,7 +1754,7 @@ export const useEditorStore = create<EditorState>()(
 
   splitLayerBySelectionAction: (layerId, selectedPixels) => {
     const { layers, layerGroups, saveToHistory } = get();
-    takeSnapshot(layers, layerGroups);
+    takeSnapshot(layers, layerGroups, get().activeLayerId);
 
     const { layers: newLayers, newLayerId } = splitLayerBySelection(
       layers,
@@ -1777,7 +1800,7 @@ export const useEditorStore = create<EditorState>()(
 
   blendBordersAction: (blendStrength = 15, layerId?: string) => {
     const { layers, layerGroups, saveToHistory } = get();
-    takeSnapshot(layers, layerGroups);
+    takeSnapshot(layers, layerGroups, get().activeLayerId);
 
     const { layers: newLayers } = blendBorderPixels(layers, blendStrength, layerId);
 

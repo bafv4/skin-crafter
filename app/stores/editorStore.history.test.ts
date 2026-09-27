@@ -1531,3 +1531,67 @@ describe('削除したグループと undo / redo', () => {
     expect(getLayer(split).groupId).toBeNull();
   });
 });
+
+// ================================================================
+// 元に戻す・やり直しと選択中のレイヤー
+// ================================================================
+describe('undo / redo と選択中のレイヤー', () => {
+  it('複製を元に戻すと元のレイヤーが選択に戻り、次に描く線は元のレイヤーに入る', () => {
+    const a = createDirectLayer('A');
+    stroke([[1, 1]], RED);
+    s().duplicateLayer(a);
+    const copy = s().activeLayerId;
+    expect(copy).not.toBe(a);
+
+    s().undo();
+    expect(s().activeLayerId).toBe(a);
+
+    const layerCount = s().layers.length;
+    stroke([[4, 4]], BLUE);
+    expect(s().layers).toHaveLength(layerCount); // 新しいレイヤーは作られない
+    expect(px(a, 4, 4)).toEqual(BLUE);
+
+    // やり直しの前に、描いた線を取り消しておく
+    s().undo();
+    s().redo(); // 線をやり直す（選択は A のまま）
+    expect(s().activeLayerId).toBe(a);
+  });
+
+  it('やり直しでは操作後に選択されていたレイヤーが選択に戻る', () => {
+    const a = createDirectLayer('A');
+    stroke([[1, 1]], RED);
+    s().duplicateLayer(a);
+    const copy = s().activeLayerId;
+    s().undo();
+
+    s().redo();
+
+    expect(s().activeLayerId).toBe(copy);
+  });
+
+  it.each([
+    ['選択範囲で分割', (a: string) => { s().splitLayerBySelectionAction(a, [{ x: 1, y: 1 }]); }],
+    ['レイヤー自動生成', () => { s().generateLayers({ applyNoise: false }); }],
+  ])('%s を元に戻すと、操作前に選択していたレイヤーが選択に戻る', (_name, action) => {
+    const globals = globalThis as unknown as { ImageData?: unknown };
+    const original = globals.ImageData;
+    globals.ImageData ??= class {
+      readonly data: Uint8ClampedArray;
+      constructor(readonly width: number, readonly height: number) {
+        this.data = new Uint8ClampedArray(width * height * 4);
+      }
+    };
+    try {
+      const a = createDirectLayer('A');
+      stroke([[1, 1], [2, 1]], RED);
+      action(a);
+      expect(s().activeLayerId).not.toBe(a);
+
+      s().undo();
+
+      expect(s().activeLayerId).toBe(a);
+    } finally {
+      globals.ImageData = original;
+    }
+  });
+});

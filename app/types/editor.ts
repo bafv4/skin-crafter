@@ -117,6 +117,9 @@ export interface HistoryEntry {
   pixelChanges: PixelChange[];
   layerChanges: LayerChange[];
   layerGroupChanges: LayerGroupChange[];
+  // 操作の前後で選択されていたレイヤー（元に戻す・やり直しで選択を戻すため）
+  activeLayerIdBefore?: string | null;
+  activeLayerIdAfter?: string | null;
 }
 
 // Skin part regions for UV mapping
