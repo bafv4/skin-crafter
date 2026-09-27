@@ -16,7 +16,9 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@components/ui/tooltip';
+import { Popover, PopoverContent, PopoverTrigger } from '@components/ui/popover';
 import { ZoomIn, ZoomOut, RotateCw, Grid3X3 } from 'lucide-react';
+import { CanvasBackgroundPicker, CanvasBackgroundSwatch, CHECKER_COLORS } from './CanvasBackgroundPicker';
 
 const DEFAULT_SCALE = 8;
 const MIN_SCALE = 4;
@@ -49,6 +51,7 @@ export function Canvas2D() {
   const modelType = useEditorStore((state) => state.modelType);
   const drawingColor = useEditorStore((state) => state.drawingColor);
   const previewVersion = useEditorStore((state) => state.previewVersion);
+  const canvasBackground = useEditorStore((state) => state.canvasBackground);
 
   // Only get layers when needed for highlight or active layer info (not for rendering)
   const layers = useEditorStore((state) => state.layers);
@@ -78,8 +81,14 @@ export function Canvas2D() {
       // Disable image smoothing for crisp pixels
       ctx.imageSmoothingEnabled = false;
 
-      // Draw checkerboard background (transparency indicator)
-      drawCheckerboard(ctx, canvas.width, canvas.height, scale, 2);
+      // Draw background (transparency indicator)
+      if (canvasBackground.type === 'checker') {
+        const [c1, c2] = CHECKER_COLORS[canvasBackground.variant];
+        drawCheckerboard(ctx, canvas.width, canvas.height, scale, 2, c1, c2);
+      } else {
+        ctx.fillStyle = canvasBackground.color;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
 
       // Get the composite and draw it
       const composite = useEditorStore.getState().getComposite();
@@ -123,7 +132,7 @@ export function Canvas2D() {
         cancelAnimationFrame(rafIdRef.current);
       }
     };
-  }, [previewVersion, scale, rectStart, rectEnd, activeTool]);
+  }, [previewVersion, scale, rectStart, rectEnd, activeTool, canvasBackground]);
 
   // Draw layer highlight on separate canvas (lightweight, only redraws on highlight change)
   useEffect(() => {
@@ -376,7 +385,7 @@ export function Canvas2D() {
   return (
     <div className="flex h-full flex-col bg-muted/30">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-border bg-card px-4 py-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-card px-4 py-2">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium">2Dキャンバス</span>
           {hoveredRegion && (
@@ -390,7 +399,7 @@ export function Canvas2D() {
           )}
         </div>
         <TooltipProvider>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <ButtonGroup>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -450,6 +459,24 @@ export function Canvas2D() {
                 <p>パーツ領域の表示を切り替え</p>
               </TooltipContent>
             </Tooltip>
+            <Popover>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" size="sm" aria-label="背景">
+                      <CanvasBackgroundSwatch background={canvasBackground} className="mr-1 h-3 w-3" />
+                      背景
+                    </Button>
+                  </PopoverTrigger>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>キャンバスの背景を変更</p>
+                </TooltipContent>
+              </Tooltip>
+              <PopoverContent align="end" className="w-80">
+                <CanvasBackgroundPicker />
+              </PopoverContent>
+            </Popover>
             <span className="tabular-nums text-xs text-muted-foreground">{scale}x</span>
           </div>
         </TooltipProvider>

@@ -73,6 +73,13 @@ export type LayerType = 'direct' | 'singleColor';
 // Theme type
 export type ThemeType = 'light' | 'dark' | 'system';
 
+// 2Dキャンバスの背景（透明部分の表示）
+export type CanvasBackground =
+  | { type: 'checker'; variant: 'light' | 'dark' }
+  | { type: 'solid'; color: string };
+
+export const DEFAULT_CANVAS_BACKGROUND: CanvasBackground = { type: 'checker', variant: 'light' };
+
 // Color palette entry
 export interface PaletteColor {
   id: string;

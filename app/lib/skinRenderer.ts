@@ -169,7 +169,7 @@ export function drawLayerHighlight(
 }
 
 // Checkerboard cache for avoiding re-rendering
-let checkerboardCache: { width: number; height: number; scale: number; size: number; canvas: HTMLCanvasElement } | null = null;
+let checkerboardCache: { width: number; height: number; scale: number; size: number; color1: string; color2: string; canvas: HTMLCanvasElement } | null = null;
 
 // Draw checkerboard pattern for transparency with caching
 export function drawCheckerboard(
@@ -186,7 +186,9 @@ export function drawCheckerboard(
       checkerboardCache.width === width &&
       checkerboardCache.height === height &&
       checkerboardCache.scale === scale &&
-      checkerboardCache.size === size) {
+      checkerboardCache.size === size &&
+      checkerboardCache.color1 === color1 &&
+      checkerboardCache.color2 === color2) {
     ctx.drawImage(checkerboardCache.canvas, 0, 0);
     return;
   }
@@ -206,7 +208,7 @@ export function drawCheckerboard(
   drawCheckerboardDirect(cacheCtx, width, height, scale, size, color1, color2);
 
   // Store in cache
-  checkerboardCache = { width, height, scale, size, canvas: cacheCanvas };
+  checkerboardCache = { width, height, scale, size, color1, color2, canvas: cacheCanvas };
 
   // Draw to target context
   ctx.drawImage(cacheCanvas, 0, 0);

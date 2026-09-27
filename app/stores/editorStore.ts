@@ -13,6 +13,8 @@ import {
   type LayerGroupChange,
   type RGBA,
   type PaletteColor,
+  type CanvasBackground,
+  DEFAULT_CANVAS_BACKGROUND,
   type MaterialType,
   type LayerPixels,
   SKIN_WIDTH,
@@ -109,6 +111,7 @@ interface EditorState {
   // Settings
   modelType: ModelType;
   showLayer2: boolean;
+  canvasBackground: CanvasBackground;
   preservePixels: boolean;
   theme: ThemeType;
 
@@ -163,6 +166,7 @@ interface EditorState {
   toggleLayer2: () => void;
   togglePreservePixels: () => void;
   setTheme: (theme: ThemeType) => void;
+  setCanvasBackground: (background: CanvasBackground) => void;
 
   // History actions
   undo: () => void;
@@ -638,7 +642,7 @@ function syncLayersToEngine(layers: Layer[]) {
 }
 
 // Persisted state subset (no actions, no transient state)
-type PersistedState = Pick<EditorState, 'layers' | 'layerGroups' | 'palette' | 'modelType' | 'showLayer2' | 'preservePixels'>;
+type PersistedState = Pick<EditorState, 'layers' | 'layerGroups' | 'palette' | 'modelType' | 'showLayer2' | 'preservePixels' | 'canvasBackground'>;
 
 export const useEditorStore = create<EditorState>()(
   persist(
@@ -654,6 +658,7 @@ export const useEditorStore = create<EditorState>()(
   drawingColor: { r: 0, g: 0, b: 0, a: 255 },
   modelType: 'steve',
   showLayer2: true,
+  canvasBackground: DEFAULT_CANVAS_BACKGROUND,
   preservePixels: false,
   theme: 'system',
   history: [],
@@ -1117,6 +1122,7 @@ export const useEditorStore = create<EditorState>()(
   toggleLayer2: () => set((state) => ({ showLayer2: !state.showLayer2 })),
   togglePreservePixels: () => set((state) => ({ preservePixels: !state.preservePixels })),
   setTheme: (theme) => set({ theme }),
+  setCanvasBackground: (background) => set({ canvasBackground: background }),
 
   // History actions
   saveToHistory: () => {
@@ -1603,6 +1609,7 @@ export const useEditorStore = create<EditorState>()(
         modelType: state.modelType,
         showLayer2: state.showLayer2,
         preservePixels: state.preservePixels,
+        canvasBackground: state.canvasBackground,
       }),
       onRehydrateStorage: () => (state) => {
         if (state?.layers && state.layers.length > 0) {
