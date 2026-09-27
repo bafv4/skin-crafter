@@ -1046,6 +1046,7 @@ const LayerGroupItem = memo(function LayerGroupItem({
 }) {
   const toggleLayerGroupCollapsed = useEditorStore((state) => state.toggleLayerGroupCollapsed);
   const deleteLayerGroup = useEditorStore((state) => state.deleteLayerGroup);
+  const recordHistory = useEditorStore((state) => state.recordHistory);
   const toggleLayerGroupVisibility = useEditorStore((state) => state.toggleLayerGroupVisibility);
   const updateLayerGroupName = useEditorStore((state) => state.updateLayerGroupName);
 
@@ -1243,7 +1244,7 @@ const LayerGroupItem = memo(function LayerGroupItem({
             <AlertDialogFooter>
               <AlertDialogCancel>キャンセル</AlertDialogCancel>
               <AlertDialogAction
-                onClick={() => deleteLayerGroup(group.id)}
+                onClick={() => recordHistory(() => deleteLayerGroup(group.id))}
                 className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               >
                 削除
@@ -1484,10 +1485,11 @@ export function LayerPanel({ width }: { width?: number }) {
 
   const handleConfirmDelete = useCallback(() => {
     if (deleteDialogState) {
-      deleteLayer(deleteDialogState.layerId);
+      const { layerId } = deleteDialogState;
+      recordHistory(() => deleteLayer(layerId));
       setDeleteDialogState(null);
     }
-  }, [deleteDialogState, deleteLayer]);
+  }, [deleteDialogState, deleteLayer, recordHistory]);
 
   // Calculate width style
   const widthStyle = width !== undefined ? { width: `${width}px` } : undefined;
@@ -1661,7 +1663,7 @@ export function LayerPanel({ width }: { width?: number }) {
           <AlertDialogHeader>
             <AlertDialogTitle>レイヤーを削除</AlertDialogTitle>
             <AlertDialogDescription>
-              「{deleteDialogState?.layerName}」を削除しますか？このレイヤーに属するすべてのピクセルが消去されます。この操作は元に戻せません。
+              「{deleteDialogState?.layerName}」を削除しますか？このレイヤーに属するすべてのピクセルが消去されます（元に戻す（Ctrl/⌘+Z）で取り消せます）。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

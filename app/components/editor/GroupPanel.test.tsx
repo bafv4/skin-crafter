@@ -413,3 +413,57 @@ describe('重なり順の値が同じときの表示と合成', () => {
     expect(front).toEqual(top === 'レイヤーX' ? RED : BLUE);
   });
 });
+
+describe('レイヤー・グループの削除と履歴', () => {
+  const RED = { r: 255, g: 0, b: 0, a: 255 };
+
+  it('レイヤーの削除を元に戻すと、ピクセル・重なり順・選択が戻り、PixelEngine にも再登録される', async () => {
+    const a = makeLayer('A', 0);
+    a.pixels[3][4] = { ...RED };
+    useEditorStore.setState({ layers: [a, makeLayer('B', 1)], activeLayerId: 'A' });
+    render(<GroupPanel />);
+    const before = arrangement();
+
+    const menu = layerCard('A').querySelector<HTMLElement>('button:has(svg.lucide-ellipsis), button:has(svg.lucide-more-horizontal)')!;
+    fireEvent.pointerDown(menu, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    fireEvent.click(await screen.findByRole('menuitem', { name: '削除' }));
+    fireEvent.click(await screen.findByRole('button', { name: '削除' }));
+
+    expect(s().layers.map((l) => l.id)).toEqual(['B']);
+    expect(s().history).toHaveLength(1);
+    vi.clearAllMocks();
+
+    s().undo();
+    expect(arrangement().layers).toEqual(expect.arrayContaining(before.layers));
+    expect(s().layers.find((l) => l.id === 'A')!.pixels[3][4]).toEqual(RED);
+    expect(s().activeLayerId).toBe('A');
+    expect(engine.createLayer).toHaveBeenCalledWith('A', 0);
+    expect(engine.setLayerData).toHaveBeenCalledWith('A', 0, expect.anything());
+
+    s().redo();
+    expect(s().layers.map((l) => l.id)).toEqual(['B']);
+  });
+
+  it('グループの削除を元に戻すと、グループとレイヤーの所属が戻る', async () => {
+    useEditorStore.setState({
+      layerGroups: [makeGroup('G1', 0)],
+      layers: [makeLayer('A', 0, 'G1'), makeLayer('B', 1, 'G1')],
+    });
+    render(<GroupPanel />);
+    const before = arrangement();
+
+    fireEvent.click(groupHeader('G1').querySelector<HTMLElement>('button:has(svg.lucide-trash2), button:has(svg.lucide-trash-2)')!);
+    fireEvent.click(await screen.findByRole('button', { name: '削除' }));
+
+    expect(s().layerGroups).toHaveLength(0);
+    expect(s().layers.every((l) => l.groupId === null)).toBe(true);
+    expect(s().history).toHaveLength(1);
+
+    s().undo();
+    expect(arrangement()).toEqual(before);
+
+    s().redo();
+    expect(s().layerGroups).toHaveLength(0);
+    expect(s().layers.every((l) => l.groupId === null)).toBe(true);
+  });
+});
