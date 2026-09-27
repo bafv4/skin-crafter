@@ -12,6 +12,14 @@ import { Popover, PopoverContent, PopoverTrigger } from '@components/ui/popover'
 import { Eye, EyeOff, RotateCcw, Pause, ZoomIn, ZoomOut, RotateCw, PersonStanding } from 'lucide-react';
 import { Preview3DCanvas, DEFAULT_PART_VISIBILITY, BODY_PART_KEYS, type PartVisibility } from './Preview3D.client';
 import { PartVisibilityPicker } from './PartVisibilityPicker';
+import { ViewHint, type HintItem } from './ViewHint';
+
+// OrbitControls の設定（Preview3D.client.tsx）に対応
+const HINT_ITEMS: HintItem[] = [
+  { keys: ['左ドラッグ', '右ドラッグ'], label: '回転' },
+  { keys: ['ホイールドラッグ'], label: '移動' },
+  { keys: ['ホイール'], label: '拡大・縮小' },
+];
 
 export function Preview3D() {
   const { showLayer2, toggleLayer2 } = useEditorStore();
@@ -131,7 +139,7 @@ export function Preview3D() {
           </div>
         </TooltipProvider>
       </div>
-      <div className="flex-1">
+      <div className="relative flex-1">
         <Preview3DCanvas
           autoRotate={autoRotate}
           zoom={zoom}
@@ -139,6 +147,7 @@ export function Preview3D() {
           resetKey={resetKey}
           partVisibility={partVisibility}
         />
+        <ViewHint items={HINT_ITEMS} storageKey="skin-crafter:hint-3d" />
       </div>
     </div>
   );

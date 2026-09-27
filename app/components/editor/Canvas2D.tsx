@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { useEditorStore } from '../../stores/editorStore';
-import { SKIN_WIDTH, SKIN_HEIGHT, getSkinParts, type SkinRegion, type RGBA } from '../../types/editor';
+import { SKIN_WIDTH, SKIN_HEIGHT, getSkinParts, type SkinRegion, type RGBA, type ToolType } from '../../types/editor';
 import {
   renderSkinToCanvas,
   drawGrid,
@@ -18,6 +18,7 @@ import {
 } from '@components/ui/tooltip';
 import { Popover, PopoverContent, PopoverTrigger } from '@components/ui/popover';
 import { ZoomIn, ZoomOut, RotateCw, Grid3X3 } from 'lucide-react';
+import { ViewHint, type HintItem } from './ViewHint';
 import { CanvasBackgroundPicker, CanvasBackgroundSwatch, CHECKER_COLORS } from './CanvasBackgroundPicker';
 
 const DEFAULT_SCALE = 8;
@@ -485,7 +486,7 @@ export function Canvas2D() {
       {/* Canvas Area */}
       <div
         ref={containerRef}
-        className="flex flex-1 items-center justify-center overflow-hidden p-4"
+        className="relative flex flex-1 items-center justify-center overflow-hidden p-4"
         onWheel={handleWheel}
         onContextMenu={(e) => e.preventDefault()}
       >
@@ -520,7 +521,27 @@ export function Canvas2D() {
             )}
           </div>
         </div>
+        <ViewHint items={getHintItems(activeTool)} storageKey="skin-crafter:hint-2d" />
       </div>
     </div>
   );
+}
+
+// 左クリック操作の説明（ツールごと）
+const TOOL_CLICK_HINTS: Record<ToolType, string> = {
+  pencil: 'クリック・ドラッグで描画',
+  eraser: 'クリック・ドラッグで消去',
+  rectangle: 'ドラッグで矩形を塗りつぶし',
+  rectangleEraser: 'ドラッグで矩形を消去',
+  eyedropper: 'クリックで色を取得（取得後は元のツールに戻る）',
+};
+
+function getHintItems(tool: ToolType): HintItem[] {
+  return [
+    { keys: ['左クリック'], label: TOOL_CLICK_HINTS[tool] },
+    { keys: ['右ドラッグ'], label: 'キャンバスを移動' },
+    { keys: ['ホイール'], label: '拡大・縮小' },
+    { keys: ['Ctrl+Z', 'Ctrl+Y'], label: '元に戻す・やり直し' },
+    { keys: ['P', 'E', 'R', 'Shift+E', 'I'], label: 'ツール切替' },
+  ];
 }
