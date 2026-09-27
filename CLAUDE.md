@@ -51,6 +51,6 @@ Skin Crafter はブラウザベースの Minecraft スキンエディタ。React
 
 Vercel にデプロイ。GitHub の main ブランチにプッシュすると自動でデプロイされる。
 
-加えて [.github/workflows/deploy.yml](.github/workflows/deploy.yml) が main へのプッシュで GitHub Pages にもデプロイする（`build/client` を配信）。サブパス配信のため、ビルド時に環境変数 `BASE_PATH`（`/<リポジトリ名>/`）を `vite.config.ts` の `base` に渡している。アセットや URL を絶対パス `/` 前提で書かないこと。
+加えて [.github/workflows/deploy.yml](.github/workflows/deploy.yml) が main へのプッシュで GitHub Pages にもデプロイする（`build/client` を配信）。型チェック・テストが失敗するとデプロイしない。サブパス配信のため、ビルド時に環境変数 `BASE_PATH`（`/<リポジトリ名>/`）を `vite.config.ts` の `base`（アセットの URL）と `react-router.config.ts` の `basename`（ルーティング）の両方に渡している。アセットや URL を絶対パス `/` 前提で書かないこと。
 
 `Dockerfile` は React Router テンプレートの名残で npm と `package-lock.json` を前提にしており、現状の pnpm 構成では動かない。

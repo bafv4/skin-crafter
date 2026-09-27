@@ -35,6 +35,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      # 型チェックとテストが通らなければ、ビルド・デプロイしない
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
       - name: Build
         run: pnpm run build
         env:
