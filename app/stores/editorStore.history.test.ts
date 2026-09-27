@@ -932,7 +932,7 @@ describe('レイヤー・グループの変更の undo / redo', () => {
       baseColor: { ...HALF_YELLOW },
       pixels: removedPixels,
     });
-    useEditorStore.setState({ layers: [keep] });
+    useEditorStore.setState({ layers: [keep], layerGroups: [makeGroup({ id: 'g1' })] });
     setHistory([
       {
         pixelChanges: [],
@@ -979,7 +979,7 @@ describe('レイヤー・グループの変更の undo / redo', () => {
       baseColor: { ...RED },
       pixels: [],
     });
-    useEditorStore.setState({ layers: [current] });
+    useEditorStore.setState({ layers: [current], layerGroups: [makeGroup({ id: 'g1' })] });
     // 実際の履歴と同様に、更新のエントリは画素を持たない（pixels: []）
     setHistory([
       {
@@ -1491,5 +1491,43 @@ describe('loadProject（プロジェクトを開く）', () => {
     s().undo();
     expect(s().layers.map((l) => l.id)).toEqual(['imported']);
     expect(px('imported', 3, 3)).toBeNull();
+  });
+});
+
+// ================================================================
+// 元に戻す・やり直しで、削除済みのグループに属するレイヤーが戻る場合
+// ================================================================
+describe('削除したグループと undo / redo', () => {
+  it('グループを削除した後に、そのグループのレイヤーを元に戻すと、グループなしのレイヤーとして戻る', () => {
+    const group = s().createLayerGroup('G');
+    const a = createDirectLayer('A');
+    stroke([[1, 1]], RED);
+    const b = createDirectLayer('B');
+    stroke([[2, 2]], BLUE);
+    s().moveLayerToGroup(b, group);
+    // B を A に統合（B はグループ G から消える）→ 空になった G を削除（履歴に残らない）
+    s().mergeLayersById(b, a);
+    s().deleteLayerGroup(group);
+
+    s().undo();
+
+    expect(getLayer(b).groupId).toBeNull();
+    expect(s().layerGroups.some((g) => g.id === group)).toBe(false);
+  });
+
+  it('グループを削除した後のやり直しで追加されるレイヤーも、グループなしになる', () => {
+    const group = s().createLayerGroup('G');
+    const a = createDirectLayer('A');
+    stroke([[1, 1], [2, 1]], RED);
+    s().moveLayerToGroup(a, group);
+    // 選択範囲で分割（新しいレイヤーは元のグループ G に入る）→ 取り消す
+    const split = s().splitLayerBySelectionAction(a, [{ x: 1, y: 1 }])!;
+    s().undo();
+    // グループを削除（履歴に残らない）
+    s().deleteLayerGroup(group);
+
+    s().redo(); // 分割をやり直す
+
+    expect(getLayer(split).groupId).toBeNull();
   });
 });

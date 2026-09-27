@@ -245,6 +245,14 @@ function applyChangedFields<T extends object>(current: T, from: T, to: T, skip: 
   return result;
 }
 
+// 存在しないグループに属するレイヤーをグループなしにする。
+// グループの作成・削除は履歴に残らないため、元に戻す・やり直しで削除済みのグループに属する
+// レイヤーが戻ることがある（そのままだとレイヤー一覧に表示されず操作できない）
+function withoutMissingGroups(layers: Layer[], layerGroups: LayerGroup[]): Layer[] {
+  const groupIds = new Set(layerGroups.map((g) => g.id));
+  return layers.map((l) => (l.groupId && !groupIds.has(l.groupId) ? { ...l, groupId: null } : l));
+}
+
 // getComposite のキャッシュ（compositeCache）を計算したときのレイヤー・グループ
 let compositeSource: { layers: Layer[]; layerGroups: LayerGroup[] } | null = null;
 
@@ -1429,7 +1437,7 @@ export const useEditorStore = create<EditorState>()(
     }
 
     set((state) => ({
-      layers: Array.from(layerMap.values()),
+      layers: withoutMissingGroups(Array.from(layerMap.values()), newLayerGroups),
       layerGroups: newLayerGroups,
       historyIndex: historyIndex - 1,
       compositeCache: null,
@@ -1495,7 +1503,7 @@ export const useEditorStore = create<EditorState>()(
     }
 
     set((state) => ({
-      layers: Array.from(layerMap.values()),
+      layers: withoutMissingGroups(Array.from(layerMap.values()), newLayerGroups),
       layerGroups: newLayerGroups,
       historyIndex: newIndex,
       compositeCache: null,
