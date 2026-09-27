@@ -1253,6 +1253,29 @@ describe('reset', () => {
     expect(changesState(() => s().undo())).toBe(false);
     expect(changesState(() => s().redo())).toBe(false);
   });
+
+  it('reset すると 3D プレビューに更新が通知される（previewVersion が進む）', () => {
+    createDirectLayer();
+    stroke([[0, 0]], RED);
+    const version = s().previewVersion;
+
+    s().reset();
+
+    expect(s().previewVersion).toBeGreaterThan(version);
+  });
+
+  it('確定前の変更があっても、reset 後の操作を元に戻したときに前のレイヤーが戻らない', () => {
+    const old = s().createLayer('前のレイヤー', RED, 'singleColor');
+    s().updateLayerColor(old, BLUE); // saveToHistory の前に reset する
+
+    s().reset();
+    const a = createDirectLayer('A');
+    stroke([[1, 1]], GREEN);
+    s().undo();
+
+    expect(s().layers.some((l) => l.id === old)).toBe(false);
+    expect(px(a, 1, 1)).toBeNull();
+  });
 });
 
 // ================================================================

@@ -1856,8 +1856,10 @@ export const useEditorStore = create<EditorState>()(
     // Clear all layers in PixelEngine
     const engine = getPixelEngine();
     engine.clearAllLayers();
+    // 確定前の変更のスナップショットが残っていると、次の操作の履歴に前のレイヤーが混ざる
+    clearSnapshot();
 
-    set({
+    set((state) => ({
       layers: [],
       layerGroups: [],
       activeLayerId: null,
@@ -1868,7 +1870,8 @@ export const useEditorStore = create<EditorState>()(
       history: [],
       historyIndex: -1,
       compositeCache: null,
-    });
+      previewVersion: state.previewVersion + 1,
+    }));
   },
 
   // Palette actions
