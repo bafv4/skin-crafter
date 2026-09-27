@@ -228,6 +228,9 @@ function cloneLayerGroups(groups: LayerGroup[]): LayerGroup[] {
   return groups.map((group) => ({ ...group }));
 }
 
+// getComposite のキャッシュ（compositeCache）を計算したときのレイヤー・グループ
+let compositeSource: { layers: Layer[]; layerGroups: LayerGroup[] } | null = null;
+
 // Snapshot of state before changes (for diff calculation)
 let snapshotLayers: Layer[] | null = null;
 let snapshotLayerGroups: LayerGroup[] | null = null;
@@ -815,9 +818,18 @@ export const useEditorStore = create<EditorState>()(
   // Note: compositeCache is invalidated when layers change, but lazily recomputed
   getComposite: () => {
     const state = get();
-    if (state.compositeCache) return state.compositeCache;
+    // キャッシュは計算に使ったレイヤー・グループの配列と結び付ける。ストアの変更は常に新しい配列を
+    // 作るので、キャッシュの破棄を忘れた操作があっても古い合成結果は返らない
+    if (
+      state.compositeCache &&
+      compositeSource?.layers === state.layers &&
+      compositeSource.layerGroups === state.layerGroups
+    ) {
+      return state.compositeCache;
+    }
 
     const composite = computeLayerComposite(state.layers, state.layerGroups);
+    compositeSource = { layers: state.layers, layerGroups: state.layerGroups };
     // Use setState without triggering re-render cycle for cache update
     set({ compositeCache: composite });
     return composite;
@@ -1168,6 +1180,7 @@ export const useEditorStore = create<EditorState>()(
         l.id === layerId ? { ...l, order: newOrder, groupId: newGroupId } : l
       ),
       compositeCache: null,
+      previewVersion: state.previewVersion + 1,
     }));
   },
 
@@ -1240,6 +1253,8 @@ export const useEditorStore = create<EditorState>()(
       layers: state.layers.map((l) =>
         l.groupId === groupId ? { ...l, groupId: null } : l
       ),
+      compositeCache: null,
+      previewVersion: state.previewVersion + 1,
     }));
   },
 
@@ -1266,6 +1281,8 @@ export const useEditorStore = create<EditorState>()(
       layerGroups: state.layerGroups.map((g) =>
         g.id === groupId ? { ...g, order: newOrder } : g
       ),
+      compositeCache: null,
+      previewVersion: state.previewVersion + 1,
     }));
   },
 
@@ -1281,6 +1298,8 @@ export const useEditorStore = create<EditorState>()(
         layers: state.layers.map((l) =>
           l.id === layerId ? { ...l, groupId, order: maxOrder + 1 } : l
         ),
+        compositeCache: null,
+        previewVersion: state.previewVersion + 1,
       };
     });
   },

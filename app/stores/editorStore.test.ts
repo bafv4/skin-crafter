@@ -1416,7 +1416,7 @@ describe('getComposite', () => {
     store().setPixelRect(0, 0, 0, 0, RED);
     const first = store().getComposite();
 
-    store().updateLayerName(id, '別名');
+    // （レイヤー名の変更などレイヤー配列が作り直される操作では、安全のため再計算される）
     store().setActiveTool('eraser');
     store().setDrawingColor(BLUE);
     store().addToPalette(GREEN);
@@ -1425,9 +1425,20 @@ describe('getComposite', () => {
   });
 
   // 各操作の後、キャッシュが無効化され新しい合成結果が返ること
-  // （reorderLayerGroup / moveLayerToGroup / deleteLayerGroup は合成結果が変わるのに
-  //   キャッシュを無効化しない不具合があるため、ここでは対象外にしている）
   it.each<[string, (id: string) => void]>([
+    ['reorderLayerGroup', (id) => {
+      const g = store().createLayerGroup('G');
+      store().moveLayerToGroup(id, g);
+      store().getComposite();
+      store().reorderLayerGroup(g, 3);
+    }],
+    ['moveLayerToGroup', (id) => { store().moveLayerToGroup(id, store().createLayerGroup('G')); }],
+    ['deleteLayerGroup', (id) => {
+      const g = store().createLayerGroup('G');
+      store().moveLayerToGroup(id, g);
+      store().getComposite();
+      store().deleteLayerGroup(g);
+    }],
     ['createLayer', () => { store().createLayer('新', BLUE); }],
     ['setPixelRect', () => store().setPixelRect(1, 1, 1, 1, BLUE)],
     ['commitDrawing', () => store().commitDrawing()],
@@ -1449,5 +1460,84 @@ describe('getComposite', () => {
     action(id);
     expect(store().compositeCache).toBeNull();
     expect(store().getComposite()).not.toBe(first);
+  });
+});
+
+// ================================================================
+// 重なり順・グループの変更と合成結果（キャンバス・3D・PNG 書き出しが使う）
+// ================================================================
+describe('重なり順・グループを変える操作と合成結果', () => {
+  // (0,0) に赤と青を塗った 2 レイヤーを作る（赤が手前: order が小さい）
+  function twoLayers() {
+    const red = store().createLayer('赤', RED, 'direct');
+    store().setPixelRect(0, 0, 0, 0, RED);
+    const blue = store().createLayer('青', BLUE, 'direct');
+    store().setPixelRect(0, 0, 0, 0, BLUE);
+    // createLayer は order を増やしていくので、赤（order 0）が手前・青（order 1）が奥
+    store().commitDrawing();
+    return { red, blue };
+  }
+
+  it('reorderLayer で重なり順を変えると、合成結果が変わりプレビューが更新される', () => {
+    const { red } = twoLayers();
+    expect(compositeAt(0, 0)).toEqual(RED);
+    const version = store().previewVersion;
+
+    store().reorderLayer(red, 5, null);
+
+    expect(compositeAt(0, 0)).toEqual(BLUE);
+    expect(store().previewVersion).toBeGreaterThan(version);
+  });
+
+  it('moveLayerToGroup でグループに入れると（グループ内は手前に来るため）合成結果が変わりプレビューが更新される', () => {
+    const { blue } = twoLayers();
+    const group = store().createLayerGroup('グループ');
+    expect(compositeAt(0, 0)).toEqual(RED);
+    const version = store().previewVersion;
+
+    store().moveLayerToGroup(blue, group);
+
+    expect(compositeAt(0, 0)).toEqual(BLUE);
+    expect(store().previewVersion).toBeGreaterThan(version);
+  });
+
+  it('reorderLayerGroup でグループの順番を変えると、合成結果が変わりプレビューが更新される', () => {
+    const { red, blue } = twoLayers();
+    const g1 = store().createLayerGroup('1');
+    const g2 = store().createLayerGroup('2');
+    store().moveLayerToGroup(red, g1);
+    store().moveLayerToGroup(blue, g2);
+    expect(compositeAt(0, 0)).toEqual(RED);
+    const version = store().previewVersion;
+
+    store().reorderLayerGroup(g1, 5);
+
+    expect(compositeAt(0, 0)).toEqual(BLUE);
+    expect(store().previewVersion).toBeGreaterThan(version);
+  });
+
+  it('非表示のグループを削除すると、中のレイヤーが表示され、プレビューが更新される', () => {
+    const { red, blue } = twoLayers();
+    store().toggleLayerVisibility(blue);
+    const group = store().createLayerGroup('非表示');
+    store().moveLayerToGroup(red, group);
+    store().toggleLayerGroupVisibility(group);
+    expect(compositeAt(0, 0)).toEqual(TRANSPARENT);
+    const version = store().previewVersion;
+
+    store().deleteLayerGroup(group);
+
+    expect(compositeAt(0, 0)).toEqual(RED);
+    expect(store().previewVersion).toBeGreaterThan(version);
+  });
+
+  it('合成結果のキャッシュは、レイヤー・グループが変わっていれば（キャッシュの破棄を忘れた操作でも）使われない', () => {
+    const { red } = twoLayers();
+    expect(compositeAt(0, 0)).toEqual(RED);
+    // compositeCache を破棄せずにレイヤーを差し替える
+    useEditorStore.setState((state) => ({
+      layers: state.layers.map((l) => (l.id === red ? { ...l, visible: false } : l)),
+    }));
+    expect(compositeAt(0, 0)).toEqual(BLUE);
   });
 });
