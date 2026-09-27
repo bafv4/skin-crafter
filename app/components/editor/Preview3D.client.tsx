@@ -129,7 +129,7 @@ const LEG_OVERLAP = 0.01;
 const LEG_SIZE: [number, number, number] = [0.5, 1.5 + LEG_OVERLAP, 0.5];
 const LEG_Y = -1.125 + LEG_OVERLAP / 2;
 
-function createSkinGeometry(
+export function createSkinGeometry(
   width: number,
   height: number,
   depth: number,

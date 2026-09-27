@@ -9,6 +9,7 @@ import {
   mergeSimilarLayers,
   splitLayerByColor,
   splitLayerBySelection,
+  get3DAdjacentPixelPairs,
 } from './layerGenerator';
 import { computeLayerComposite } from './layerComposite';
 import {
@@ -667,6 +668,18 @@ describe('generateLayersFromImageData', () => {
         [15, 3, RED],
       ]);
       expect(generateLayersFromImageData(connected).layers).toHaveLength(1);
+    });
+
+    it('head-right の上端と head-top の左端は同じ向きでつながる（反転しない）', () => {
+      // right の (i, 8) は top の (8, i) とつながる
+      expect(generateLayersFromImageData(imageWith([[2, 8, RED], [8, 2, RED]])).layers).toHaveLength(1);
+      expect(generateLayersFromImageData(imageWith([[2, 8, RED], [8, 5, RED]])).layers).toHaveLength(2);
+    });
+
+    it('head-front の下端と head-bottom の下端は同じ向きでつながる（反転しない）', () => {
+      // front の (8+i, 15) は bottom の (16+i, 7) とつながる
+      expect(generateLayersFromImageData(imageWith([[10, 15, RED], [18, 7, RED]])).layers).toHaveLength(1);
+      expect(generateLayersFromImageData(imageWith([[10, 15, RED], [21, 7, RED]])).layers).toHaveLength(2);
     });
 
     it('腕（right-arm-right の左端と right-arm-back の右端）も 3D でつながる', () => {
@@ -1566,6 +1579,73 @@ describe('分割の前後で合成結果・グループ・表示状態が保た�
       expect(created.visible).toBe(visible);
       const inGroup = result.layers.filter((l) => l.groupId === 'g').map((l) => l.order);
       expect(new Set(inGroup).size).toBe(inGroup.length);
+    }
+  });
+});
+
+// ---- 3D での面のつながり（全パーツ） ----
+
+describe('get3DAdjacentPixelPairs（3D で隣り合う、別の面のピクセルの組）', () => {
+  // パーツ名（head, hat, right-arm など）→ 面ごとの領域
+  const parts = new Map<string, Map<string, (typeof SKIN_PARTS)[number]>>();
+  for (const region of SKIN_PARTS) {
+    const face = region.name.slice(region.name.lastIndexOf('-') + 1);
+    const part = region.name.slice(0, region.name.lastIndexOf('-'));
+    if (!parts.has(part)) parts.set(part, new Map());
+    parts.get(part)!.set(face, region);
+  }
+  const key = (p: { x: number; y: number }) => `${p.x},${p.y}`;
+  const regionOf = (p: { x: number; y: number }) =>
+    SKIN_PARTS.find((r) => p.x >= r.x && p.x < r.x + r.width && p.y >= r.y && p.y < r.y + r.height);
+
+  const pairs = get3DAdjacentPixelPairs();
+  const partners = new Map<string, Set<string>>();
+  for (const { p1, p2 } of pairs) {
+    if (!partners.has(key(p1))) partners.set(key(p1), new Set());
+    if (!partners.has(key(p2))) partners.set(key(p2), new Set());
+    partners.get(key(p1))!.add(key(p2));
+    partners.get(key(p2))!.add(key(p1));
+  }
+
+  it('組は同じパーツの別の面同士で、重複しない', () => {
+    const seen = new Set<string>();
+    for (const { p1, p2 } of pairs) {
+      const r1 = regionOf(p1)!;
+      const r2 = regionOf(p2)!;
+      expect(r1.name).not.toBe(r2.name);
+      expect(r1.name.slice(0, r1.name.lastIndexOf('-'))).toBe(r2.name.slice(0, r2.name.lastIndexOf('-')));
+      const id = [key(p1), key(p2)].sort().join('|');
+      expect(seen.has(id)).toBe(false);
+      seen.add(id);
+    }
+  });
+
+  it.each([...parts.keys()])('%s: 辺のピクセルは隣の面と 1 つ（角は 2 つ）で隣り合い、角の 3 ピクセルは互いに隣り合う', (part) => {
+    const faces = parts.get(part)!;
+    const front = faces.get('front')!;
+    const right = faces.get('right')!;
+    const [w, h, d] = [front.width, front.height, right.width];
+
+    let count = 0;
+    for (const { p1 } of pairs) if (regionOf(p1)!.name.startsWith(`${part}-`)) count++;
+    // 箱の 12 本の辺: 幅・高さ・奥行きの辺が 4 本ずつ
+    expect(count).toBe(4 * (w + h + d));
+
+    for (const region of faces.values()) {
+      for (let y = region.y; y < region.y + region.height; y++) {
+        for (let x = region.x; x < region.x + region.width; x++) {
+          const onLeftOrRight = x === region.x || x === region.x + region.width - 1;
+          const onTopOrBottom = y === region.y || y === region.y + region.height - 1;
+          const expected = (onLeftOrRight ? 1 : 0) + (onTopOrBottom ? 1 : 0);
+          const mine = partners.get(`${x},${y}`) ?? new Set<string>();
+          expect(mine.size).toBe(expected);
+          if (expected === 2) {
+            // 角: 2 つの相手同士も隣り合う（3D の角で 3 つの面が接する）
+            const [a, b] = [...mine];
+            expect(partners.get(a)?.has(b)).toBe(true);
+          }
+        }
+      }
     }
   });
 });

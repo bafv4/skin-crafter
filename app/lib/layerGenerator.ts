@@ -83,264 +83,94 @@ function getBodyPartName(region: SkinRegion, includeLayer = false): string {
   return baseName;
 }
 
-// Edge direction types
-type EdgeDirection = 'top' | 'bottom' | 'left' | 'right';
+// ---- 3D で隣り合うピクセル（UV 上では離れた、別の面の辺同士） ----
+//
+// 3D プレビュー（Preview3D.client.tsx の createSkinGeometry）と同じ規則で、各面の四隅が
+// 箱のどこに来るかを定め、ピクセル中心の 3D 座標から隣り合う組を求める。
+// three.js BoxGeometry の面に skinview3d と同じ UV の貼り方をしたときの対応:
+//   front → +Z、back → -Z、right（キャラクターの右）→ -X、left → +X、top → +Y、bottom → -Y
+// 各面の画像上の 左上・右上・左下・右下 が、3D のどの角に来るか（w, h, d は箱の半分の大きさ）
+type Vec3 = [number, number, number];
+type FaceCorners = { tl: Vec3; tr: Vec3; bl: Vec3; br: Vec3 };
 
-// UV edge connection definition
-// Defines how edges of different faces connect in 3D space
-interface UVEdgeConnection {
-  face1: string;       // e.g., "head-front"
-  edge1: EdgeDirection;
-  face2: string;       // e.g., "head-left"
-  edge2: EdgeDirection;
-  reversed: boolean;   // Whether the edge pixels are in reverse order
-}
+const FACE_CORNERS: Record<string, (w: number, h: number, d: number) => FaceCorners> = {
+  front: (w, h, d) => ({ tl: [-w, h, d], tr: [w, h, d], bl: [-w, -h, d], br: [w, -h, d] }),
+  back: (w, h, d) => ({ tl: [w, h, -d], tr: [-w, h, -d], bl: [w, -h, -d], br: [-w, -h, -d] }),
+  right: (w, h, d) => ({ tl: [-w, h, -d], tr: [-w, h, d], bl: [-w, -h, -d], br: [-w, -h, d] }),
+  left: (w, h, d) => ({ tl: [w, h, d], tr: [w, h, -d], bl: [w, -h, d], br: [w, -h, -d] }),
+  top: (w, h, d) => ({ tl: [-w, h, -d], tr: [w, h, -d], bl: [-w, h, d], br: [w, h, d] }),
+  // 底面は three.js の -Y 面の頂点順に合わせて UV の貼り方が異なる（上下が反転する）
+  bottom: (w, h, d) => ({ tl: [-w, -h, -d], tr: [w, -h, -d], bl: [-w, -h, d], br: [w, -h, d] }),
+};
 
-// Define all 3D edge connections for Minecraft skin parts
-// When two edges connect, their pixels are adjacent in 3D even though separate in 2D
-const UV_EDGE_CONNECTIONS: UVEdgeConnection[] = [
-  // === HEAD (Layer 1) ===
-  // Front-Left-Back-Right horizontal wrap (looking from outside)
-  { face1: 'head-front', edge1: 'left', face2: 'head-right', edge2: 'right', reversed: false },
-  { face1: 'head-front', edge1: 'right', face2: 'head-left', edge2: 'left', reversed: false },
-  { face1: 'head-left', edge1: 'right', face2: 'head-back', edge2: 'left', reversed: false },
-  { face1: 'head-right', edge1: 'left', face2: 'head-back', edge2: 'right', reversed: false },
-  // Top connections (top face viewed from above, matching front orientation)
-  { face1: 'head-front', edge1: 'top', face2: 'head-top', edge2: 'bottom', reversed: false },
-  { face1: 'head-left', edge1: 'top', face2: 'head-top', edge2: 'right', reversed: true },
-  { face1: 'head-right', edge1: 'top', face2: 'head-top', edge2: 'left', reversed: true },
-  { face1: 'head-back', edge1: 'top', face2: 'head-top', edge2: 'top', reversed: true },
-  // Bottom connections (bottom face viewed from below, front's bottom connects to bottom's bottom)
-  { face1: 'head-front', edge1: 'bottom', face2: 'head-bottom', edge2: 'bottom', reversed: true },
-  { face1: 'head-left', edge1: 'bottom', face2: 'head-bottom', edge2: 'right', reversed: true },
-  { face1: 'head-right', edge1: 'bottom', face2: 'head-bottom', edge2: 'left', reversed: true },
-  { face1: 'head-back', edge1: 'bottom', face2: 'head-bottom', edge2: 'top', reversed: false },
+type PixelPair = { p1: { x: number; y: number }; p2: { x: number; y: number } };
 
-  // === BODY (Layer 1) ===
-  { face1: 'body-front', edge1: 'left', face2: 'body-right', edge2: 'right', reversed: false },
-  { face1: 'body-front', edge1: 'right', face2: 'body-left', edge2: 'left', reversed: false },
-  { face1: 'body-left', edge1: 'right', face2: 'body-back', edge2: 'left', reversed: false },
-  { face1: 'body-right', edge1: 'left', face2: 'body-back', edge2: 'right', reversed: false },
-  { face1: 'body-front', edge1: 'top', face2: 'body-top', edge2: 'bottom', reversed: false },
-  { face1: 'body-left', edge1: 'top', face2: 'body-top', edge2: 'right', reversed: true },
-  { face1: 'body-right', edge1: 'top', face2: 'body-top', edge2: 'left', reversed: true },
-  { face1: 'body-back', edge1: 'top', face2: 'body-top', edge2: 'top', reversed: true },
-  { face1: 'body-front', edge1: 'bottom', face2: 'body-bottom', edge2: 'bottom', reversed: true },
-  { face1: 'body-left', edge1: 'bottom', face2: 'body-bottom', edge2: 'right', reversed: true },
-  { face1: 'body-right', edge1: 'bottom', face2: 'body-bottom', edge2: 'left', reversed: true },
-  { face1: 'body-back', edge1: 'bottom', face2: 'body-bottom', edge2: 'top', reversed: false },
+let adjacentPairsCache: PixelPair[] | null = null;
 
-  // === RIGHT ARM (Layer 1) ===
-  { face1: 'right-arm-front', edge1: 'left', face2: 'right-arm-right', edge2: 'right', reversed: false },
-  { face1: 'right-arm-front', edge1: 'right', face2: 'right-arm-left', edge2: 'left', reversed: false },
-  { face1: 'right-arm-left', edge1: 'right', face2: 'right-arm-back', edge2: 'left', reversed: false },
-  { face1: 'right-arm-right', edge1: 'left', face2: 'right-arm-back', edge2: 'right', reversed: false },
-  { face1: 'right-arm-front', edge1: 'top', face2: 'right-arm-top', edge2: 'bottom', reversed: false },
-  { face1: 'right-arm-left', edge1: 'top', face2: 'right-arm-top', edge2: 'right', reversed: true },
-  { face1: 'right-arm-right', edge1: 'top', face2: 'right-arm-top', edge2: 'left', reversed: true },
-  { face1: 'right-arm-back', edge1: 'top', face2: 'right-arm-top', edge2: 'top', reversed: true },
-  { face1: 'right-arm-front', edge1: 'bottom', face2: 'right-arm-bottom', edge2: 'bottom', reversed: true },
-  { face1: 'right-arm-left', edge1: 'bottom', face2: 'right-arm-bottom', edge2: 'right', reversed: true },
-  { face1: 'right-arm-right', edge1: 'bottom', face2: 'right-arm-bottom', edge2: 'left', reversed: true },
-  { face1: 'right-arm-back', edge1: 'bottom', face2: 'right-arm-bottom', edge2: 'top', reversed: false },
+/**
+ * 3D で辺を挟んで隣り合う、別の面のピクセルの組を返す（同じパーツ内のみ）。
+ * ピクセル中心同士の距離が √0.5（辺をまたいだ隣）の組を隣接とみなす。
+ */
+export function get3DAdjacentPixelPairs(): PixelPair[] {
+  if (adjacentPairsCache) return adjacentPairsCache;
 
-  // === LEFT ARM (Layer 1) ===
-  { face1: 'left-arm-front', edge1: 'left', face2: 'left-arm-right', edge2: 'right', reversed: false },
-  { face1: 'left-arm-front', edge1: 'right', face2: 'left-arm-left', edge2: 'left', reversed: false },
-  { face1: 'left-arm-left', edge1: 'right', face2: 'left-arm-back', edge2: 'left', reversed: false },
-  { face1: 'left-arm-right', edge1: 'left', face2: 'left-arm-back', edge2: 'right', reversed: false },
-  { face1: 'left-arm-front', edge1: 'top', face2: 'left-arm-top', edge2: 'bottom', reversed: false },
-  { face1: 'left-arm-left', edge1: 'top', face2: 'left-arm-top', edge2: 'right', reversed: true },
-  { face1: 'left-arm-right', edge1: 'top', face2: 'left-arm-top', edge2: 'left', reversed: true },
-  { face1: 'left-arm-back', edge1: 'top', face2: 'left-arm-top', edge2: 'top', reversed: true },
-  { face1: 'left-arm-front', edge1: 'bottom', face2: 'left-arm-bottom', edge2: 'bottom', reversed: true },
-  { face1: 'left-arm-left', edge1: 'bottom', face2: 'left-arm-bottom', edge2: 'right', reversed: true },
-  { face1: 'left-arm-right', edge1: 'bottom', face2: 'left-arm-bottom', edge2: 'left', reversed: true },
-  { face1: 'left-arm-back', edge1: 'bottom', face2: 'left-arm-bottom', edge2: 'top', reversed: false },
-
-  // === RIGHT LEG (Layer 1) ===
-  { face1: 'right-leg-front', edge1: 'left', face2: 'right-leg-right', edge2: 'right', reversed: false },
-  { face1: 'right-leg-front', edge1: 'right', face2: 'right-leg-left', edge2: 'left', reversed: false },
-  { face1: 'right-leg-left', edge1: 'right', face2: 'right-leg-back', edge2: 'left', reversed: false },
-  { face1: 'right-leg-right', edge1: 'left', face2: 'right-leg-back', edge2: 'right', reversed: false },
-  { face1: 'right-leg-front', edge1: 'top', face2: 'right-leg-top', edge2: 'bottom', reversed: false },
-  { face1: 'right-leg-left', edge1: 'top', face2: 'right-leg-top', edge2: 'right', reversed: true },
-  { face1: 'right-leg-right', edge1: 'top', face2: 'right-leg-top', edge2: 'left', reversed: true },
-  { face1: 'right-leg-back', edge1: 'top', face2: 'right-leg-top', edge2: 'top', reversed: true },
-  { face1: 'right-leg-front', edge1: 'bottom', face2: 'right-leg-bottom', edge2: 'bottom', reversed: true },
-  { face1: 'right-leg-left', edge1: 'bottom', face2: 'right-leg-bottom', edge2: 'right', reversed: true },
-  { face1: 'right-leg-right', edge1: 'bottom', face2: 'right-leg-bottom', edge2: 'left', reversed: true },
-  { face1: 'right-leg-back', edge1: 'bottom', face2: 'right-leg-bottom', edge2: 'top', reversed: false },
-
-  // === LEFT LEG (Layer 1) ===
-  { face1: 'left-leg-front', edge1: 'left', face2: 'left-leg-right', edge2: 'right', reversed: false },
-  { face1: 'left-leg-front', edge1: 'right', face2: 'left-leg-left', edge2: 'left', reversed: false },
-  { face1: 'left-leg-left', edge1: 'right', face2: 'left-leg-back', edge2: 'left', reversed: false },
-  { face1: 'left-leg-right', edge1: 'left', face2: 'left-leg-back', edge2: 'right', reversed: false },
-  { face1: 'left-leg-front', edge1: 'top', face2: 'left-leg-top', edge2: 'bottom', reversed: false },
-  { face1: 'left-leg-left', edge1: 'top', face2: 'left-leg-top', edge2: 'right', reversed: true },
-  { face1: 'left-leg-right', edge1: 'top', face2: 'left-leg-top', edge2: 'left', reversed: true },
-  { face1: 'left-leg-back', edge1: 'top', face2: 'left-leg-top', edge2: 'top', reversed: true },
-  { face1: 'left-leg-front', edge1: 'bottom', face2: 'left-leg-bottom', edge2: 'bottom', reversed: true },
-  { face1: 'left-leg-left', edge1: 'bottom', face2: 'left-leg-bottom', edge2: 'right', reversed: true },
-  { face1: 'left-leg-right', edge1: 'bottom', face2: 'left-leg-bottom', edge2: 'left', reversed: true },
-  { face1: 'left-leg-back', edge1: 'bottom', face2: 'left-leg-bottom', edge2: 'top', reversed: false },
-
-  // === HAT (Layer 2) ===
-  { face1: 'hat-front', edge1: 'left', face2: 'hat-right', edge2: 'right', reversed: false },
-  { face1: 'hat-front', edge1: 'right', face2: 'hat-left', edge2: 'left', reversed: false },
-  { face1: 'hat-left', edge1: 'right', face2: 'hat-back', edge2: 'left', reversed: false },
-  { face1: 'hat-right', edge1: 'left', face2: 'hat-back', edge2: 'right', reversed: false },
-  { face1: 'hat-front', edge1: 'top', face2: 'hat-top', edge2: 'bottom', reversed: false },
-  { face1: 'hat-left', edge1: 'top', face2: 'hat-top', edge2: 'right', reversed: true },
-  { face1: 'hat-right', edge1: 'top', face2: 'hat-top', edge2: 'left', reversed: true },
-  { face1: 'hat-back', edge1: 'top', face2: 'hat-top', edge2: 'top', reversed: true },
-  { face1: 'hat-front', edge1: 'bottom', face2: 'hat-bottom', edge2: 'bottom', reversed: true },
-  { face1: 'hat-left', edge1: 'bottom', face2: 'hat-bottom', edge2: 'right', reversed: true },
-  { face1: 'hat-right', edge1: 'bottom', face2: 'hat-bottom', edge2: 'left', reversed: true },
-  { face1: 'hat-back', edge1: 'bottom', face2: 'hat-bottom', edge2: 'top', reversed: false },
-
-  // === JACKET (Layer 2) ===
-  { face1: 'jacket-front', edge1: 'left', face2: 'jacket-right', edge2: 'right', reversed: false },
-  { face1: 'jacket-front', edge1: 'right', face2: 'jacket-left', edge2: 'left', reversed: false },
-  { face1: 'jacket-left', edge1: 'right', face2: 'jacket-back', edge2: 'left', reversed: false },
-  { face1: 'jacket-right', edge1: 'left', face2: 'jacket-back', edge2: 'right', reversed: false },
-  { face1: 'jacket-front', edge1: 'top', face2: 'jacket-top', edge2: 'bottom', reversed: false },
-  { face1: 'jacket-left', edge1: 'top', face2: 'jacket-top', edge2: 'right', reversed: true },
-  { face1: 'jacket-right', edge1: 'top', face2: 'jacket-top', edge2: 'left', reversed: true },
-  { face1: 'jacket-back', edge1: 'top', face2: 'jacket-top', edge2: 'top', reversed: true },
-  { face1: 'jacket-front', edge1: 'bottom', face2: 'jacket-bottom', edge2: 'bottom', reversed: true },
-  { face1: 'jacket-left', edge1: 'bottom', face2: 'jacket-bottom', edge2: 'right', reversed: true },
-  { face1: 'jacket-right', edge1: 'bottom', face2: 'jacket-bottom', edge2: 'left', reversed: true },
-  { face1: 'jacket-back', edge1: 'bottom', face2: 'jacket-bottom', edge2: 'top', reversed: false },
-
-  // === RIGHT SLEEVE (Layer 2) ===
-  { face1: 'right-sleeve-front', edge1: 'left', face2: 'right-sleeve-right', edge2: 'right', reversed: false },
-  { face1: 'right-sleeve-front', edge1: 'right', face2: 'right-sleeve-left', edge2: 'left', reversed: false },
-  { face1: 'right-sleeve-left', edge1: 'right', face2: 'right-sleeve-back', edge2: 'left', reversed: false },
-  { face1: 'right-sleeve-right', edge1: 'left', face2: 'right-sleeve-back', edge2: 'right', reversed: false },
-  { face1: 'right-sleeve-front', edge1: 'top', face2: 'right-sleeve-top', edge2: 'bottom', reversed: false },
-  { face1: 'right-sleeve-left', edge1: 'top', face2: 'right-sleeve-top', edge2: 'right', reversed: true },
-  { face1: 'right-sleeve-right', edge1: 'top', face2: 'right-sleeve-top', edge2: 'left', reversed: true },
-  { face1: 'right-sleeve-back', edge1: 'top', face2: 'right-sleeve-top', edge2: 'top', reversed: true },
-  { face1: 'right-sleeve-front', edge1: 'bottom', face2: 'right-sleeve-bottom', edge2: 'bottom', reversed: true },
-  { face1: 'right-sleeve-left', edge1: 'bottom', face2: 'right-sleeve-bottom', edge2: 'right', reversed: true },
-  { face1: 'right-sleeve-right', edge1: 'bottom', face2: 'right-sleeve-bottom', edge2: 'left', reversed: true },
-  { face1: 'right-sleeve-back', edge1: 'bottom', face2: 'right-sleeve-bottom', edge2: 'top', reversed: false },
-
-  // === LEFT SLEEVE (Layer 2) ===
-  { face1: 'left-sleeve-front', edge1: 'left', face2: 'left-sleeve-right', edge2: 'right', reversed: false },
-  { face1: 'left-sleeve-front', edge1: 'right', face2: 'left-sleeve-left', edge2: 'left', reversed: false },
-  { face1: 'left-sleeve-left', edge1: 'right', face2: 'left-sleeve-back', edge2: 'left', reversed: false },
-  { face1: 'left-sleeve-right', edge1: 'left', face2: 'left-sleeve-back', edge2: 'right', reversed: false },
-  { face1: 'left-sleeve-front', edge1: 'top', face2: 'left-sleeve-top', edge2: 'bottom', reversed: false },
-  { face1: 'left-sleeve-left', edge1: 'top', face2: 'left-sleeve-top', edge2: 'right', reversed: true },
-  { face1: 'left-sleeve-right', edge1: 'top', face2: 'left-sleeve-top', edge2: 'left', reversed: true },
-  { face1: 'left-sleeve-back', edge1: 'top', face2: 'left-sleeve-top', edge2: 'top', reversed: true },
-  { face1: 'left-sleeve-front', edge1: 'bottom', face2: 'left-sleeve-bottom', edge2: 'bottom', reversed: true },
-  { face1: 'left-sleeve-left', edge1: 'bottom', face2: 'left-sleeve-bottom', edge2: 'right', reversed: true },
-  { face1: 'left-sleeve-right', edge1: 'bottom', face2: 'left-sleeve-bottom', edge2: 'left', reversed: true },
-  { face1: 'left-sleeve-back', edge1: 'bottom', face2: 'left-sleeve-bottom', edge2: 'top', reversed: false },
-
-  // === RIGHT PANTS (Layer 2) ===
-  { face1: 'right-pants-front', edge1: 'left', face2: 'right-pants-right', edge2: 'right', reversed: false },
-  { face1: 'right-pants-front', edge1: 'right', face2: 'right-pants-left', edge2: 'left', reversed: false },
-  { face1: 'right-pants-left', edge1: 'right', face2: 'right-pants-back', edge2: 'left', reversed: false },
-  { face1: 'right-pants-right', edge1: 'left', face2: 'right-pants-back', edge2: 'right', reversed: false },
-  { face1: 'right-pants-front', edge1: 'top', face2: 'right-pants-top', edge2: 'bottom', reversed: false },
-  { face1: 'right-pants-left', edge1: 'top', face2: 'right-pants-top', edge2: 'right', reversed: true },
-  { face1: 'right-pants-right', edge1: 'top', face2: 'right-pants-top', edge2: 'left', reversed: true },
-  { face1: 'right-pants-back', edge1: 'top', face2: 'right-pants-top', edge2: 'top', reversed: true },
-  { face1: 'right-pants-front', edge1: 'bottom', face2: 'right-pants-bottom', edge2: 'bottom', reversed: true },
-  { face1: 'right-pants-left', edge1: 'bottom', face2: 'right-pants-bottom', edge2: 'right', reversed: true },
-  { face1: 'right-pants-right', edge1: 'bottom', face2: 'right-pants-bottom', edge2: 'left', reversed: true },
-  { face1: 'right-pants-back', edge1: 'bottom', face2: 'right-pants-bottom', edge2: 'top', reversed: false },
-
-  // === LEFT PANTS (Layer 2) ===
-  { face1: 'left-pants-front', edge1: 'left', face2: 'left-pants-right', edge2: 'right', reversed: false },
-  { face1: 'left-pants-front', edge1: 'right', face2: 'left-pants-left', edge2: 'left', reversed: false },
-  { face1: 'left-pants-left', edge1: 'right', face2: 'left-pants-back', edge2: 'left', reversed: false },
-  { face1: 'left-pants-right', edge1: 'left', face2: 'left-pants-back', edge2: 'right', reversed: false },
-  { face1: 'left-pants-front', edge1: 'top', face2: 'left-pants-top', edge2: 'bottom', reversed: false },
-  { face1: 'left-pants-left', edge1: 'top', face2: 'left-pants-top', edge2: 'right', reversed: true },
-  { face1: 'left-pants-right', edge1: 'top', face2: 'left-pants-top', edge2: 'left', reversed: true },
-  { face1: 'left-pants-back', edge1: 'top', face2: 'left-pants-top', edge2: 'top', reversed: true },
-  { face1: 'left-pants-front', edge1: 'bottom', face2: 'left-pants-bottom', edge2: 'bottom', reversed: true },
-  { face1: 'left-pants-left', edge1: 'bottom', face2: 'left-pants-bottom', edge2: 'right', reversed: true },
-  { face1: 'left-pants-right', edge1: 'bottom', face2: 'left-pants-bottom', edge2: 'left', reversed: true },
-  { face1: 'left-pants-back', edge1: 'bottom', face2: 'left-pants-bottom', edge2: 'top', reversed: false },
-];
-
-// Get edge pixels for a skin region
-function getEdgePixels(
-  region: SkinRegion,
-  edge: EdgeDirection
-): { x: number; y: number }[] {
-  const pixels: { x: number; y: number }[] = [];
-
-  switch (edge) {
-    case 'top':
-      for (let x = region.x; x < region.x + region.width; x++) {
-        pixels.push({ x, y: region.y });
-      }
-      break;
-    case 'bottom':
-      for (let x = region.x; x < region.x + region.width; x++) {
-        pixels.push({ x, y: region.y + region.height - 1 });
-      }
-      break;
-    case 'left':
-      for (let y = region.y; y < region.y + region.height; y++) {
-        pixels.push({ x: region.x, y });
-      }
-      break;
-    case 'right':
-      for (let y = region.y; y < region.y + region.height; y++) {
-        pixels.push({ x: region.x + region.width - 1, y });
-      }
-      break;
+  // パーツ（head, hat, right-arm など）ごとに面の領域をまとめる
+  const parts = new Map<string, Map<string, SkinRegion>>();
+  for (const region of SKIN_PARTS) {
+    const i = region.name.lastIndexOf('-');
+    const part = region.name.slice(0, i);
+    if (!parts.has(part)) parts.set(part, new Map());
+    parts.get(part)!.set(region.name.slice(i + 1), region);
   }
 
-  return pixels;
-}
+  const pairs: PixelPair[] = [];
+  for (const faces of parts.values()) {
+    const front = faces.get('front');
+    const right = faces.get('right');
+    if (!front || !right) continue;
+    // 箱の大きさ（ピクセル単位）の半分
+    const w = front.width / 2;
+    const h = front.height / 2;
+    const d = right.width / 2;
 
-// Build a map of skin part name -> SkinRegion for quick lookup
-function buildSkinPartMap(): Map<string, SkinRegion> {
-  const map = new Map<string, SkinRegion>();
-  for (const part of SKIN_PARTS) {
-    map.set(part.name, part);
-  }
-  return map;
-}
+    // 各面の辺にあるピクセルの 3D 中心座標
+    const edgePixels: { face: string; x: number; y: number; pos: Vec3 }[] = [];
+    for (const [face, region] of faces) {
+      const cornersOf = FACE_CORNERS[face];
+      if (!cornersOf) continue;
+      const { tl, tr, bl, br } = cornersOf(w, h, d);
+      for (let y = region.y; y < region.y + region.height; y++) {
+        for (let x = region.x; x < region.x + region.width; x++) {
+          const onEdge =
+            x === region.x || x === region.x + region.width - 1 ||
+            y === region.y || y === region.y + region.height - 1;
+          if (!onEdge) continue;
+          const s = (x - region.x + 0.5) / region.width;
+          const t = (y - region.y + 0.5) / region.height;
+          const pos = [0, 1, 2].map(
+            (k) => tl[k] * (1 - s) * (1 - t) + tr[k] * s * (1 - t) + bl[k] * (1 - s) * t + br[k] * s * t
+          ) as Vec3;
+          edgePixels.push({ face, x, y, pos });
+        }
+      }
+    }
 
-// Get all 3D-adjacent pixel pairs from UV edge connections
-function get3DAdjacentPixelPairs(): { p1: { x: number; y: number }; p2: { x: number; y: number } }[] {
-  const pairs: { p1: { x: number; y: number }; p2: { x: number; y: number } }[] = [];
-  const skinPartMap = buildSkinPartMap();
-
-  for (const connection of UV_EDGE_CONNECTIONS) {
-    const region1 = skinPartMap.get(connection.face1);
-    const region2 = skinPartMap.get(connection.face2);
-
-    if (!region1 || !region2) continue;
-
-    const edge1Pixels = getEdgePixels(region1, connection.edge1);
-    const edge2Pixels = getEdgePixels(region2, connection.edge2);
-
-    // Edges should have same length for proper mapping
-    const minLen = Math.min(edge1Pixels.length, edge2Pixels.length);
-
-    for (let i = 0; i < minLen; i++) {
-      const p1 = edge1Pixels[i];
-      const p2Index = connection.reversed ? (minLen - 1 - i) : i;
-      const p2 = edge2Pixels[p2Index];
-
-      if (p1 && p2) {
-        pairs.push({ p1, p2 });
+    for (let i = 0; i < edgePixels.length; i++) {
+      for (let j = i + 1; j < edgePixels.length; j++) {
+        const a = edgePixels[i];
+        const b = edgePixels[j];
+        if (a.face === b.face) continue;
+        const dx = a.pos[0] - b.pos[0];
+        const dy = a.pos[1] - b.pos[1];
+        const dz = a.pos[2] - b.pos[2];
+        if (Math.abs(dx * dx + dy * dy + dz * dz - 0.5) < 1e-6) {
+          pairs.push({ p1: { x: a.x, y: a.y }, p2: { x: b.x, y: b.y } });
+        }
       }
     }
   }
 
+  adjacentPairsCache = pairs;
   return pairs;
 }
 
@@ -521,7 +351,7 @@ export function generateLayersFromImageData(
     const color2 = colors[p2.y]?.[p2.x];
 
     if (color1 && color2 && areColorsSimilar(color1, color2, colorThreshold)) {
-      // Both pixels must be within same body part (handled by UV_EDGE_CONNECTIONS definition)
+      // Both pixels are within the same body part (get3DAdjacentPixelPairs only pairs faces of one part)
       uf.union(toIndex(p1.x, p1.y), toIndex(p2.x, p2.y));
     }
   }
