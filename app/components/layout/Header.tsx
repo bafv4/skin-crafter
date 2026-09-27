@@ -19,6 +19,7 @@ import {
   AlertDialogTitle,
 } from '@components/ui/alert-dialog';
 import { CraftingTableIcon } from '@components/icons/CraftingTableIcon';
+import { AboutDialog } from './AboutDialog';
 import { useEditorStore } from '../../stores/editorStore';
 import { downloadSkin, loadSkinFromFile } from '@lib/skinRenderer';
 import { useEffect, useRef } from 'react';
@@ -77,6 +78,7 @@ export function Header() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const jsonInputRef = useRef<HTMLInputElement>(null);
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
 
   // Apply theme to document
   useEffect(() => {
@@ -333,10 +335,20 @@ export function Header() {
   return (
     <TooltipProvider>
       <header className="flex h-14 items-center justify-between border-b border-border bg-card px-4">
-        <div className="flex items-center gap-3">
-          <CraftingTableIcon className="h-8 w-8" />
-          <h1 className="text-xl font-bold text-foreground">Skin Crafter</h1>
-        </div>
+        {/* タイトルをクリックすると「Skin Crafter について」を開く */}
+        <h1 className="text-xl font-bold text-foreground">
+          <button
+            type="button"
+            className="flex items-center gap-3 whitespace-nowrap rounded-md -mx-1 px-1 hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            onClick={() => setAboutOpen(true)}
+            aria-haspopup="dialog"
+            title="Skin Crafter について"
+          >
+            <CraftingTableIcon className="h-8 w-8" />
+            Skin Crafter
+          </button>
+        </h1>
+        <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} />
 
         <div className="flex items-center gap-2">
           <input

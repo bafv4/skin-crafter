@@ -2,7 +2,7 @@
 // ヘッダーのプロジェクト（JSON）書き出し・読み込みのテスト
 import 'fake-indexeddb/auto';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 vi.mock('../../lib/pixelEngine', () => import('../../test/pixelEngineMock'));
 
@@ -136,5 +136,26 @@ describe('プロジェクト（JSON）の書き出しと読み込み', () => {
     s().undo();
     expect(s().layers.map((l) => l.id)).toEqual(importedIds);
     expect(s().layerGroups).toEqual([]);
+  });
+});
+
+describe('Skin Crafter について', () => {
+  it('タイトルをクリックすると、バージョンやショートカットを載せたダイアログが開き、Esc で閉じる', async () => {
+    render(<Header />);
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /Skin Crafter/ }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Skin Crafter' });
+    const { version } = await import('../../../package.json');
+    expect(within(dialog).getByText(`バージョン ${version.replace(/^v/, '')}`)).toBeTruthy();
+    expect(within(dialog).getByText('ペンシル')).toBeTruthy();
+    expect(within(dialog).getByText('Ctrl/⌘+Z')).toBeTruthy();
+    const link = within(dialog).getByRole('link', { name: /GitHub/ });
+    expect(link.getAttribute('href')).toBe('https://github.com/bafv4/skin-crafter');
+    expect(link.getAttribute('target')).toBe('_blank');
+
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 });
