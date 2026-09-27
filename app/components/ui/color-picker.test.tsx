@@ -842,3 +842,59 @@ describe('ColorPicker: パレット', () => {
     });
   });
 });
+
+describe('ColorPicker: 外部からの色の変更への追従', () => {
+  it('HEX 欄で今と同じ色を入力し直した後でも、外部からの変更が表示に反映される', () => {
+    render(<StatefulPicker initial={RED} external={BLUE} />);
+    // 途中まで消してから同じ色を打ち直す
+    fireEvent.change(getHexInput(), { target: { value: '#ff00' } });
+    fireEvent.change(getHexInput(), { target: { value: '#ff0000' } });
+    expect(currentColorOf()).toEqual(RED);
+
+    fireEvent.click(screen.getByRole('button', { name: '外部から変更' }));
+
+    expect(getHexInput().value).toBe('#0000ff');
+  });
+
+  it('彩度・明度エリアで今と同じ色をクリックした後でも、外部からの変更の後のクリックは新しい色相で始まる', () => {
+    const { container } = render(<StatefulPicker initial={RED} external={BLUE} />);
+    const area = getSaturationValueArea(container);
+    mockRect(area, { left: 0, top: 0, width: 100, height: 100 });
+    // 右上（純色）= 今と同じ赤
+    pointer.down(area, 100, 0);
+    pointer.up(area, 100, 0);
+    expect(currentColorOf()).toEqual(RED);
+
+    fireEvent.click(screen.getByRole('button', { name: '外部から変更' }));
+    expect(getHexInput().value).toBe('#0000ff');
+
+    // 右上をクリック → 外部から設定された青の色相の純色（赤に戻らない）
+    pointer.down(area, 100, 0);
+    pointer.up(area, 100, 0);
+    expect(currentColorOf()).toEqual(BLUE);
+  });
+
+  it('パレットで今と同じ色を選んだ後でも、外部からの変更が表示に反映される', () => {
+    useEditorStore.setState({ palette: [{ id: 'p', color: { ...RED } }] });
+    render(<StatefulPicker initial={RED} external={BLUE} />);
+    fireEvent.click(screen.getByRole('button', { name: '#ff0000' }));
+
+    fireEvent.click(screen.getByRole('button', { name: '外部から変更' }));
+
+    expect(getHexInput().value).toBe('#0000ff');
+  });
+
+  it('自分のドラッグで黒にしても、色相スライダーの位置は保たれる（外部からの変更と区別する）', () => {
+    const { container } = render(<StatefulPicker initial={BLUE} />);
+    const area = getSaturationValueArea(container);
+    mockRect(area, { left: 0, top: 0, width: 100, height: 100 });
+    const hueThumbLeft = () => (getHueSlider().firstElementChild as HTMLElement).style.left;
+    const before = hueThumbLeft();
+
+    pointer.down(area, 50, 100); // 明度 0 → 黒（色相の情報は色からは失われる）
+    pointer.up(area, 50, 100);
+
+    expect(currentColorOf()).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+    expect(hueThumbLeft()).toBe(before);
+  });
+});

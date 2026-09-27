@@ -424,16 +424,16 @@ export function ColorPicker({
   const [hsv, setHsv] = useState<HSV>(() => rgbToHsv(color.r, color.g, color.b));
   const [hexInput, setHexInput] = useState(() => rgbaToHex(color));
 
-  // Track if the color change came from internal vs external
-  const isInternalChange = useRef(false);
-
-  // Sync HSV when external color changes
+  // 外部から色が変わったら表示を合わせる。
+  // 今の HSV が表す色と同じなら（自分が出した変更の反映なので）HSV はそのまま保つ
+  // （黒や灰色では色から色相・彩度が復元できず、つまみが飛んでしまうため）
   useEffect(() => {
-    if (!isInternalChange.current) {
+    const current = hsvToRgb(hsv.h, hsv.s, hsv.v);
+    if (current.r !== color.r || current.g !== color.g || current.b !== color.b) {
       setHsv(rgbToHsv(color.r, color.g, color.b));
-      setHexInput(rgbaToHex(color));
     }
-    isInternalChange.current = false;
+    const hex = rgbaToHex(color);
+    setHexInput((input) => (input.toLowerCase() === hex ? input : hex));
   }, [color.r, color.g, color.b, color.a]);
 
   const updateFromHsv = useCallback(
@@ -442,7 +442,6 @@ export function ColorPicker({
       const newColor = { ...rgb, a: alpha };
       setHsv(newHsv);
       setHexInput(rgbaToHex(newColor));
-      isInternalChange.current = true;
       onChange(newColor);
     },
     [color.a, onChange]
@@ -464,7 +463,6 @@ export function ColorPicker({
 
   const handleAlphaChange = useCallback(
     (a: number) => {
-      isInternalChange.current = true;
       onChange({ ...color, a });
     },
     [color, onChange]
@@ -476,7 +474,6 @@ export function ColorPicker({
     if (/^#[0-9a-f]{6}$/i.test(hex)) {
       const newColor = hexToRgba(hex, color.a);
       setHsv(rgbToHsv(newColor.r, newColor.g, newColor.b));
-      isInternalChange.current = true;
       onChange(newColor);
       onChangeComplete?.();
     }
@@ -486,7 +483,6 @@ export function ColorPicker({
     (paletteColor: RGBA) => {
       setHsv(rgbToHsv(paletteColor.r, paletteColor.g, paletteColor.b));
       setHexInput(rgbaToHex(paletteColor));
-      isInternalChange.current = true;
       onChange({ ...paletteColor });
       onChangeComplete?.();
     },
