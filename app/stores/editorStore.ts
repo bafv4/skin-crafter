@@ -178,6 +178,8 @@ interface EditorState {
   undo: () => void;
   redo: () => void;
   saveToHistory: () => void;
+  // apply 内の変更（ドラッグでの並べ替えなど、複数のアクションにまたがる操作）を 1 件の履歴として記録する
+  recordHistory: (apply: () => void) => void;
 
   // File actions
   loadFromImageData: (imageData: ImageData) => void;
@@ -1396,6 +1398,15 @@ export const useEditorStore = create<EditorState>()(
       history: newHistory,
       historyIndex: newHistory.length - 1,
     });
+  },
+
+  recordHistory: (apply) => {
+    if (!snapshotLayers) {
+      const { layers, layerGroups, activeLayerId } = get();
+      takeSnapshot(layers, layerGroups, activeLayerId);
+    }
+    apply();
+    get().saveToHistory();
   },
 
   undo: () => {

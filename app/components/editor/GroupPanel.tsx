@@ -1086,6 +1086,8 @@ const LayerGroupItem = memo(function LayerGroupItem({
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
+    // パネル側の「グループの外へ出す」処理に伝わると、グループに入れたレイヤーがすぐ外へ出てしまう
+    e.stopPropagation();
     if (!draggedItem) return;
 
     if (draggedItem.type === 'layer') {
@@ -1301,6 +1303,7 @@ export function LayerPanel({ width }: { width?: number }) {
   const reorderLayer = useEditorStore((state) => state.reorderLayer);
   const reorderLayerGroup = useEditorStore((state) => state.reorderLayerGroup);
   const moveLayerToGroup = useEditorStore((state) => state.moveLayerToGroup);
+  const recordHistory = useEditorStore((state) => state.recordHistory);
   const deleteLayer = useEditorStore((state) => state.deleteLayer);
 
   // Shared dialog state - single dialogs instead of per-layer dialogs
@@ -1396,40 +1399,44 @@ export function LayerPanel({ width }: { width?: number }) {
       }
     }
 
-    // Move the layer to the new position
-    reorderLayer(draggedItem.id, newOrder, targetGroupId);
+    // 移動と番号の振り直しをまとめて 1 回の操作として履歴に記録する
+    recordHistory(() => {
+      // Move the layer to the new position
+      reorderLayer(draggedLayer.id, newOrder, targetGroupId);
 
-    // Re-normalize orders in target group (including the moved layer)
-    const updatedTargetLayers = layers
-      .filter((l) => l.groupId === targetGroupId || l.id === draggedItem!.id)
-      .map((l) => (l.id === draggedItem!.id ? { ...l, order: newOrder, groupId: targetGroupId } : l))
-      .filter((l) => l.groupId === targetGroupId)
-      .sort((a, b) => a.order - b.order);
-
-    updatedTargetLayers.forEach((l, i) => {
-      if (l.order !== i) {
-        reorderLayer(l.id, i, targetGroupId);
-      }
-    });
-
-    // If moving between groups, re-normalize source group
-    if (sourceGroupId !== targetGroupId) {
-      const sourceGroupLayers = layers
-        .filter((l) => l.groupId === sourceGroupId && l.id !== draggedItem!.id)
+      // Re-normalize orders in target group (including the moved layer)
+      const updatedTargetLayers = layers
+        .filter((l) => l.groupId === targetGroupId || l.id === draggedLayer.id)
+        .map((l) => (l.id === draggedLayer.id ? { ...l, order: newOrder, groupId: targetGroupId } : l))
+        .filter((l) => l.groupId === targetGroupId)
         .sort((a, b) => a.order - b.order);
 
-      sourceGroupLayers.forEach((l, i) => {
+      updatedTargetLayers.forEach((l, i) => {
         if (l.order !== i) {
-          reorderLayer(l.id, i, sourceGroupId);
+          reorderLayer(l.id, i, targetGroupId);
         }
       });
-    }
-  }, [layers, reorderLayer]);
+
+      // If moving between groups, re-normalize source group
+      if (sourceGroupId !== targetGroupId) {
+        const sourceGroupLayers = layers
+          .filter((l) => l.groupId === sourceGroupId && l.id !== draggedLayer.id)
+          .sort((a, b) => a.order - b.order);
+
+        sourceGroupLayers.forEach((l, i) => {
+          if (l.order !== i) {
+            reorderLayer(l.id, i, sourceGroupId);
+          }
+        });
+      }
+    });
+  }, [layers, reorderLayer, recordHistory]);
 
   const handleLayerToGroupDrop = useCallback((e: React.DragEvent, groupId: string) => {
     if (!draggedItem || draggedItem.type !== 'layer') return;
-    moveLayerToGroup(draggedItem.id, groupId);
-  }, [moveLayerToGroup]);
+    const layerId = draggedItem.id;
+    recordHistory(() => moveLayerToGroup(layerId, groupId));
+  }, [moveLayerToGroup, recordHistory]);
 
   // Handle dropping a layer outside of a group (before/after group in the list)
   const handleLayerDropOutsideGroup = useCallback((e: React.DragEvent, position: 'before' | 'after', referenceGroupId: string) => {
@@ -1458,22 +1465,24 @@ export function LayerPanel({ width }: { width?: number }) {
       newOrder = ungroupedLayers.length > 0 ? ungroupedLayers[ungroupedLayers.length - 1].order + 1 : 0;
     }
 
-    // First move to null group, then reorder
-    reorderLayer(draggedItem.id, newOrder, null);
+    recordHistory(() => {
+      // First move to null group, then reorder
+      reorderLayer(draggedLayer.id, newOrder, null);
 
-    // Re-normalize orders for ungrouped layers
-    const updatedUngroupedLayers = layers
-      .filter((l) => l.groupId === null || l.id === draggedItem!.id)
-      .map((l) => (l.id === draggedItem!.id ? { ...l, order: newOrder, groupId: null } : l))
-      .filter((l) => l.groupId === null)
-      .sort((a, b) => a.order - b.order);
+      // Re-normalize orders for ungrouped layers
+      const updatedUngroupedLayers = layers
+        .filter((l) => l.groupId === null || l.id === draggedLayer.id)
+        .map((l) => (l.id === draggedLayer.id ? { ...l, order: newOrder, groupId: null } : l))
+        .filter((l) => l.groupId === null)
+        .sort((a, b) => a.order - b.order);
 
-    updatedUngroupedLayers.forEach((l, i) => {
-      if (l.order !== i) {
-        reorderLayer(l.id, i, null);
-      }
+      updatedUngroupedLayers.forEach((l, i) => {
+        if (l.order !== i) {
+          reorderLayer(l.id, i, null);
+        }
+      });
     });
-  }, [layers, layerGroups, reorderLayer]);
+  }, [layers, layerGroups, reorderLayer, recordHistory]);
 
   const handleGroupReorderDrop = useCallback((e: React.DragEvent, targetGroupId: string, position: 'before' | 'after') => {
     if (!draggedItem || draggedItem.type !== 'group') return;
@@ -1486,27 +1495,29 @@ export function LayerPanel({ width }: { width?: number }) {
     const targetOrder = targetGroup.order;
     const newOrder = position === 'before' ? targetOrder - 0.5 : targetOrder + 0.5;
 
-    reorderLayerGroup(draggedItem.id, newOrder);
+    recordHistory(() => {
+      reorderLayerGroup(draggedGroup.id, newOrder);
 
-    // Re-normalize orders
-    const updatedGroups = layerGroups
-      .map((g) => (g.id === draggedItem!.id ? { ...g, order: newOrder } : g))
-      .sort((a, b) => a.order - b.order);
+      // Re-normalize orders
+      const updatedGroups = layerGroups
+        .map((g) => (g.id === draggedGroup.id ? { ...g, order: newOrder } : g))
+        .sort((a, b) => a.order - b.order);
 
-    updatedGroups.forEach((g, i) => {
-      if (g.order !== i) {
-        reorderLayerGroup(g.id, i);
-      }
+      updatedGroups.forEach((g, i) => {
+        if (g.order !== i) {
+          reorderLayerGroup(g.id, i);
+        }
+      });
     });
-  }, [layerGroups, reorderLayerGroup]);
+  }, [layerGroups, reorderLayerGroup, recordHistory]);
 
   const handleDropOutsideGroup = useCallback((e: React.DragEvent) => {
     if (!draggedItem || draggedItem.type !== 'layer') return;
     const layer = layers.find((l) => l.id === draggedItem!.id);
     if (layer && layer.groupId !== null) {
-      moveLayerToGroup(draggedItem.id, null);
+      recordHistory(() => moveLayerToGroup(layer.id, null));
     }
-  }, [layers, moveLayerToGroup]);
+  }, [layers, moveLayerToGroup, recordHistory]);
 
   // Shared dialog handlers
   const handleOpenDetailDialog = useCallback((layerId: string) => {

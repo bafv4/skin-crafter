@@ -1595,3 +1595,96 @@ describe('undo / redo と選択中のレイヤー', () => {
     }
   });
 });
+
+// ================================================================
+// 複数のアクションにまたがる操作（ドラッグでの並べ替えなど）の履歴
+// ================================================================
+describe('recordHistory（複数の変更を 1 件の履歴にまとめる）', () => {
+  // レイヤー・グループの並び（id, order, groupId）だけを取り出す
+  function arrangement() {
+    return {
+      layers: s().layers.map(({ id, order, groupId }) => ({ id, order, groupId })),
+      groups: s().layerGroups.map(({ id, order }) => ({ id, order })),
+    };
+  }
+
+  it('中で行った複数の変更を 1 件の履歴にまとめ、undo / redo でまとめて戻る', () => {
+    const a = createDirectLayer('A');
+    stroke([[1, 1]], RED);
+    const b = createDirectLayer('B');
+    stroke([[2, 2]], BLUE);
+    const group = s().createLayerGroup('G');
+    const historyLength = s().history.length;
+    const before = arrangement();
+
+    s().recordHistory(() => {
+      s().reorderLayer(a, 5, null);
+      s().moveLayerToGroup(b, group);
+      s().reorderLayerGroup(group, 3);
+    });
+    const after = arrangement();
+
+    expect(s().history).toHaveLength(historyLength + 1);
+    s().undo();
+    expect(arrangement()).toEqual(before);
+    s().redo();
+    expect(arrangement()).toEqual(after);
+  });
+
+  it('何も変わらなければ履歴を追加しない', () => {
+    const a = createDirectLayer('A');
+    stroke([[1, 1]], RED);
+    const historyLength = s().history.length;
+
+    s().recordHistory(() => {
+      s().reorderLayer(a, getLayer(a).order, null);
+    });
+
+    expect(s().history).toHaveLength(historyLength);
+  });
+
+  it('確定前の変更（ドラッグ中の基本色など）があっても、その変更前の状態を取りこぼさない', () => {
+    const a = s().createLayer('A', RED, 'singleColor');
+    const historyLength = s().history.length;
+    s().updateLayerColor(a, BLUE); // saveToHistory の前
+
+    s().recordHistory(() => {
+      s().reorderLayer(a, 9, null);
+    });
+    expect(s().history).toHaveLength(historyLength + 1);
+
+    s().undo();
+    expect(getLayer(a).baseColor).toEqual(RED);
+    expect(getLayer(a).order).not.toBe(9);
+  });
+
+  it('選択範囲で分割 → ドラッグで並べ替え → 2 回元に戻すと、分割前の並びと見た目に戻る', () => {
+    const a = createDirectLayer('A');
+    stroke([[1, 1], [2, 1]], RED);
+    const b = createDirectLayer('B');
+    stroke([[1, 1], [3, 1]], BLUE);
+    const before = arrangement();
+    const beforeComposite = s().getComposite();
+
+    const split = s().splitLayerBySelectionAction(a, [{ x: 1, y: 1 }])!;
+    expect(split).not.toBeNull();
+
+    // レイヤーパネルのドラッグと同じ手順: 分割したレイヤーを一番後ろへ移し、番号を振り直す
+    s().recordHistory(() => {
+      const maxOrder = Math.max(...s().layers.map((l) => l.order));
+      s().reorderLayer(split, maxOrder + 1, null);
+      [...s().layers]
+        .sort((p, q) => p.order - q.order)
+        .forEach((l, i) => {
+          if (l.order !== i) s().reorderLayer(l.id, i, null);
+        });
+    });
+
+    s().undo(); // 並べ替えを戻す
+    s().undo(); // 分割を戻す
+
+    expect(s().layers.map((l) => l.id).sort()).toEqual([a, b].sort());
+    expect(arrangement()).toEqual(before);
+    expect(s().getComposite()).toEqual(beforeComposite);
+  });
+});
