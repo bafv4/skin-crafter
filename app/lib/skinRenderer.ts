@@ -278,14 +278,16 @@ export async function downloadSkin(
 
   renderSkinToCanvas(ctx, composite, 1);
 
-  const blob = await canvasToBlob(canvas);
-  const url = URL.createObjectURL(blob);
+  downloadBlob(await canvasToBlob(canvas), filename);
+}
 
+// Blob をファイルとしてダウンロードさせる
+export function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
   link.download = filename;
   link.click();
-
   URL.revokeObjectURL(url);
 }
 

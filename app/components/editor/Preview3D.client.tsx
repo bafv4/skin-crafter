@@ -1,5 +1,5 @@
-import { useRef, useEffect, useMemo, type ReactNode } from 'react';
-import { Canvas, useFrame, invalidate } from '@react-three/fiber';
+import { useRef, useEffect, useMemo, type MutableRefObject, type ReactNode } from 'react';
+import { Canvas, useFrame, useThree, invalidate } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { useEditorStore } from '../../stores/editorStore';
@@ -600,6 +600,45 @@ function RenderController({ autoRotate }: { autoRotate: boolean }) {
   return null;
 }
 
+// 3D プレビューを PNG 画像にする関数（背景は透明）
+export type Capture3D = () => Promise<Blob>;
+
+// 書き出す画像の長辺の最小ピクセル数（表示が小さくても十分な解像度にする）と、描画倍率の上限
+const CAPTURE_MIN_LONG_SIDE = 1024;
+const CAPTURE_MAX_PIXEL_RATIO = 4;
+
+export function captureScale(width: number, height: number, currentRatio: number): number {
+  const needed = CAPTURE_MIN_LONG_SIDE / Math.max(width, height, 1);
+  return Math.min(CAPTURE_MAX_PIXEL_RATIO, Math.max(currentRatio, needed));
+}
+
+// Canvas の中から、いまの視点・ポーズのまま書き出す関数を captureRef に渡す
+function CaptureBridge({ captureRef }: { captureRef: MutableRefObject<Capture3D | null> }) {
+  const { gl, scene, camera, size } = useThree();
+
+  useEffect(() => {
+    captureRef.current = () => {
+      const previousRatio = gl.getPixelRatio();
+      gl.setPixelRatio(captureScale(size.width, size.height, previousRatio));
+      gl.render(scene, camera);
+      // toBlob は呼び出した時点の描画内容を写し取るので、描画直後に呼ぶ
+      return new Promise<Blob>((resolve, reject) => {
+        gl.domElement.toBlob((blob) => {
+          if (blob) resolve(blob);
+          else reject(new Error('3D プレビューを画像にできませんでした'));
+        }, 'image/png');
+        gl.setPixelRatio(previousRatio);
+        invalidate();
+      });
+    };
+    return () => {
+      captureRef.current = null;
+    };
+  }, [gl, scene, camera, size, captureRef]);
+
+  return null;
+}
+
 export function Preview3DCanvas({
   autoRotate = true,
   zoom = 1,
@@ -607,6 +646,7 @@ export function Preview3DCanvas({
   resetKey = 0,
   partVisibility,
   pose = DEFAULT_POSE,
+  captureRef,
 }: {
   autoRotate?: boolean;
   zoom?: number;
@@ -614,6 +654,7 @@ export function Preview3DCanvas({
   resetKey?: number;
   partVisibility: PartVisibility;
   pose?: Pose;
+  captureRef?: MutableRefObject<Capture3D | null>;
 }) {
   return (
     <Canvas
@@ -623,6 +664,7 @@ export function Preview3DCanvas({
       flat
     >
       <RenderController autoRotate={autoRotate} />
+      {captureRef && <CaptureBridge captureRef={captureRef} />}
       <Scene autoRotate={autoRotate} zoom={zoom} onZoomChange={onZoomChange} resetKey={resetKey} partVisibility={partVisibility} pose={pose} />
     </Canvas>
   );

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useEditorStore } from '../../stores/editorStore';
 import { Button } from '@components/ui/button';
 import { ButtonGroup } from '@components/ui/button-group';
@@ -9,8 +9,9 @@ import {
   TooltipTrigger,
 } from '@components/ui/tooltip';
 import { Popover, PopoverContent, PopoverTrigger } from '@components/ui/popover';
-import { Eye, EyeOff, RotateCcw, Pause, ZoomIn, ZoomOut, RotateCw, PersonStanding, Footprints } from 'lucide-react';
-import { Preview3DCanvas, DEFAULT_PART_VISIBILITY, BODY_PART_KEYS, type PartVisibility } from './Preview3D.client';
+import { Eye, EyeOff, RotateCcw, Pause, ZoomIn, ZoomOut, RotateCw, PersonStanding, Footprints, Camera } from 'lucide-react';
+import { Preview3DCanvas, DEFAULT_PART_VISIBILITY, BODY_PART_KEYS, type Capture3D, type PartVisibility } from './Preview3D.client';
+import { downloadBlob } from '@lib/skinRenderer';
 import { PartVisibilityPicker } from './PartVisibilityPicker';
 import { PosePicker } from './PosePicker';
 import { DEFAULT_POSE, isDefaultPose, type Pose } from '../../lib/pose';
@@ -31,6 +32,17 @@ export function Preview3D() {
   const [resetKey, setResetKey] = useState(0);
   const [partVisibility, setPartVisibility] = useState<PartVisibility>(DEFAULT_PART_VISIBILITY);
   const [pose, setPose] = useState<Pose>(DEFAULT_POSE);
+  const captureRef = useRef<Capture3D | null>(null);
+
+  // いまの視点・ポーズ・表示パーツのまま PNG で保存する
+  const handleSaveImage = async () => {
+    if (!captureRef.current) return;
+    try {
+      downloadBlob(await captureRef.current(), 'minecraft-skin-3d.png');
+    } catch (error) {
+      console.error('Failed to export 3D preview:', error);
+    }
+  };
   const hasHiddenParts = BODY_PART_KEYS.some(
     (key) => !partVisibility[key].inner || !partVisibility[key].outer
   );
@@ -145,6 +157,16 @@ export function Preview3D() {
             </Popover>
             <Tooltip>
               <TooltipTrigger asChild>
+                <Button variant="outline" size="sm" onClick={handleSaveImage} aria-label="画像で保存">
+                  <Camera className="h-3 w-3" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>いまの見た目を画像（PNG・背景透明）で保存</p>
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
                 <Button
                   variant={showLayer2 ? 'default' : 'outline'}
                   size="sm"
@@ -169,6 +191,7 @@ export function Preview3D() {
           resetKey={resetKey}
           partVisibility={partVisibility}
           pose={pose}
+          captureRef={captureRef}
         />
         <ViewHint items={HINT_ITEMS} storageKey="skin-crafter:hint-3d" />
       </div>

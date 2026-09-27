@@ -29,7 +29,7 @@ import {
 import { CraftingTableIcon } from '@components/icons/CraftingTableIcon';
 import { AboutDialog } from './AboutDialog';
 import { useEditorStore } from '../../stores/editorStore';
-import { downloadSkin, loadSkinFromFile } from '@lib/skinRenderer';
+import { downloadBlob, downloadSkin, loadSkinFromFile } from '@lib/skinRenderer';
 import { useEffect, useRef } from 'react';
 import type { Layer, LayerGroup, PaletteColor, RGBA, LayerPixels, MaterialType } from '../../types/editor';
 import { createEmptyLayerPixels, SKIN_WIDTH, SKIN_HEIGHT } from '../../types/editor';
@@ -169,13 +169,7 @@ export function Header() {
 
       // Use compact JSON (no pretty print)
       const json = JSON.stringify(data);
-      const blob = new Blob([json], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'skin-project.json';
-      a.click();
-      URL.revokeObjectURL(url);
+      downloadBlob(new Blob([json], { type: 'application/json' }), 'skin-project.json');
     } catch (error) {
       console.error('Failed to export JSON:', error);
     }
