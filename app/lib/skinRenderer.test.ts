@@ -566,6 +566,28 @@ describe('renderSkinToCanvas', () => {
     expect(draws[0].imageSmoothingEnabled).toBe(false);
   });
 
+  it('オフスクリーンキャンバスが使えない環境でも scale 倍に拡大して描画し、透明ピクセルは描かない', () => {
+    installCanvasFactory({ withContext: false });
+    // (1,0) は赤、(2,3) は半透明の青、それ以外は透明
+    const composite = makeComposite((x, y) =>
+      x === 1 && y === 0
+        ? { r: 255, g: 0, b: 0, a: 255 }
+        : x === 2 && y === 3
+          ? { r: 0, g: 0, b: 255, a: 128 }
+          : { r: 0, g: 0, b: 0, a: 0 }
+    );
+    const ctx = new FakeContext2D();
+
+    renderer.renderSkinToCanvas(ctx.asCtx(), composite, 8);
+
+    // putImageData は変換行列を無視して等倍で書き込んでしまうため使わない
+    expect(ctx.ops('putImageData')).toHaveLength(0);
+    expect(paintedRects(ctx)).toEqual([
+      { x: 8, y: 0, w: 8, h: 8, color: 'rgba(255, 0, 0, 1)' },
+      { x: 16, y: 24, w: 8, h: 8, color: `rgba(0, 0, 255, ${128 / 255})` },
+    ]);
+  });
+
   it('オフスクリーンキャンバスは使い回し、2 回目以降は最新の合成結果を描画する', () => {
     const offscreens = stubOffscreenCanvas();
     const first = makeComposite(() => ({ r: 255, g: 0, b: 0, a: 255 }));

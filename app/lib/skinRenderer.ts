@@ -72,12 +72,17 @@ export function renderSkinToCanvas(
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(offscreen.canvas as CanvasImageSource, 0, 0, width, height);
   } else {
-    // Fallback: direct putImageData at scale 1, then scale context
-    ctx.save();
-    ctx.scale(scale, scale);
-    ctx.imageSmoothingEnabled = false;
-    ctx.putImageData(imageData, 0, 0);
-    ctx.restore();
+    // オフスクリーンキャンバスが使えない場合は 1 ピクセルずつ拡大して塗る
+    // （putImageData は変換行列を無視するため ctx.scale では拡大できない）
+    for (let y = 0; y < SKIN_HEIGHT; y++) {
+      const row = composite[y];
+      for (let x = 0; x < SKIN_WIDTH; x++) {
+        const pixel = row[x];
+        if (pixel.a === 0) continue;
+        ctx.fillStyle = `rgba(${pixel.r}, ${pixel.g}, ${pixel.b}, ${pixel.a / 255})`;
+        ctx.fillRect(x * scale, y * scale, scale, scale);
+      }
+    }
   }
 }
 
