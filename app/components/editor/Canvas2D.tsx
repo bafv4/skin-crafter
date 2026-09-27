@@ -247,6 +247,8 @@ export function Canvas2D() {
         const pixel = composite[pos.y][pos.x];
         if (pixel.a > 0) {
           setDrawingColor(pixel);
+          // 色を取得したら元のツールに戻る（透明ピクセルならスポイトのまま）
+          useEditorStore.getState().restorePreviousTool();
         }
         return;
       }

@@ -99,6 +99,8 @@ interface EditorState {
   // Selection state
   activeLayerId: string | null;
   activeTool: ToolType;
+  // スポイトで色を取得した後に戻るツール
+  previousTool: ToolType;
   highlightedLayerId: string | null;
 
   // Direct drawing color
@@ -125,6 +127,8 @@ interface EditorState {
   setPixelRect: (x1: number, y1: number, x2: number, y2: number, color: RGBA | null) => void;
   commitDrawing: () => void;
   setActiveTool: (tool: ToolType) => void;
+  // スポイト使用後、直前のツールに戻す
+  restorePreviousTool: () => void;
   setActiveLayer: (layerId: string | null) => void;
   setHighlightedLayer: (layerId: string | null) => void;
   setDrawingColor: (color: RGBA) => void;
@@ -645,6 +649,7 @@ export const useEditorStore = create<EditorState>()(
   compositeCache: null,
   activeLayerId: null,
   activeTool: 'pencil',
+  previousTool: 'pencil',
   highlightedLayerId: null,
   drawingColor: { r: 0, g: 0, b: 0, a: 255 },
   modelType: 'steve',
@@ -793,7 +798,14 @@ export const useEditorStore = create<EditorState>()(
     set((state) => ({ compositeCache: null, previewVersion: state.previewVersion + 1 }));
   },
 
-  setActiveTool: (tool) => set({ activeTool: tool }),
+  setActiveTool: (tool) => set((state) => {
+    // スポイトに切り替えるときは、戻り先として現在のツールを記録する
+    if (tool === 'eyedropper' && state.activeTool !== 'eyedropper') {
+      return { activeTool: tool, previousTool: state.activeTool };
+    }
+    return { activeTool: tool };
+  }),
+  restorePreviousTool: () => set((state) => ({ activeTool: state.previousTool })),
   setActiveLayer: (layerId) => set({ activeLayerId: layerId }),
   setHighlightedLayer: (layerId) => set({ highlightedLayerId: layerId }),
   setDrawingColor: (color) => set({ drawingColor: color }),
@@ -1537,6 +1549,7 @@ export const useEditorStore = create<EditorState>()(
       layerGroups: [],
       activeLayerId: null,
       activeTool: 'pencil',
+      previousTool: 'pencil',
       highlightedLayerId: null,
       history: [],
       historyIndex: -1,
