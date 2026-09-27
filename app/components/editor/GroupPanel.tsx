@@ -1,7 +1,7 @@
 import { useState, memo, useCallback, useMemo, useEffect } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useStoreWithEqualityFn } from 'zustand/traditional';
-import { Plus, Trash2, Wand2, Merge, GitMerge, RefreshCw, GripVertical, ChevronRight, ChevronDown, FolderPlus, Palette, PaintBucket, Settings2, Eye, EyeOff, Copy, MoreHorizontal } from 'lucide-react';
+import { Pipette, Plus, Trash2, Wand2, Merge, GitMerge, RefreshCw, GripVertical, ChevronRight, ChevronDown, FolderPlus, Palette, PaintBucket, Settings2, Eye, EyeOff, Copy, MoreHorizontal } from 'lucide-react';
 import { Button } from '@components/ui/button';
 import { Input } from '@components/ui/input';
 import { Label } from '@components/ui/label';
@@ -485,6 +485,10 @@ function LayerDetailDialog({
   const updateLayerColor = useEditorStore((state) => state.updateLayerColor);
   const updateLayerName = useEditorStore((state) => state.updateLayerName);
   const updateLayerOpacity = useEditorStore((state) => state.updateLayerOpacity);
+  const startLayerColorPick = useEditorStore((state) => state.startLayerColorPick);
+  // キャンバスから基本色を取得している間はダイアログを一時的に隠す
+  // （コンポーネントはマウントしたままにし、未適用のノイズ設定などを保持する）
+  const isPickingColor = useEditorStore((state) => state.layerColorPickTarget === layerId);
 
   // Layer name editing
   const [editName, setEditName] = useState(layer?.name ?? '');
@@ -542,7 +546,7 @@ function LayerDetailDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open && !isPickingColor} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[500px] max-h-[85vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>レイヤー設定</DialogTitle>
@@ -591,7 +595,21 @@ function LayerDetailDialog({
           {/* Base Color (only for singleColor mode) */}
           {layer.layerType === 'singleColor' && (
             <div className="flex flex-col gap-2">
-              <Label>基本色</Label>
+              <div className="flex items-center justify-between">
+                <Label>基本色</Label>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1.5"
+                  onClick={() => {
+                    handleNameChange();
+                    startLayerColorPick(layerId);
+                  }}
+                >
+                  <Pipette className="h-3.5 w-3.5" />
+                  キャンバスから取得
+                </Button>
+              </div>
               <div className="p-3 border rounded-lg">
                 <ColorPicker
                   color={layer.baseColor}

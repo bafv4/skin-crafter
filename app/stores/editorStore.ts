@@ -103,6 +103,8 @@ interface EditorState {
   activeTool: ToolType;
   // スポイトで色を取得した後に戻るツール
   previousTool: ToolType;
+  // レイヤー設定の「基本色」をキャンバスから取得中の対象レイヤー（取得中でなければ null）
+  layerColorPickTarget: string | null;
   highlightedLayerId: string | null;
 
   // Direct drawing color
@@ -132,6 +134,8 @@ interface EditorState {
   setActiveTool: (tool: ToolType) => void;
   // スポイト使用後、直前のツールに戻す
   restorePreviousTool: () => void;
+  startLayerColorPick: (layerId: string) => void;
+  endLayerColorPick: () => void;
   setActiveLayer: (layerId: string | null) => void;
   setHighlightedLayer: (layerId: string | null) => void;
   setDrawingColor: (color: RGBA) => void;
@@ -654,6 +658,7 @@ export const useEditorStore = create<EditorState>()(
   activeLayerId: null,
   activeTool: 'pencil',
   previousTool: 'pencil',
+  layerColorPickTarget: null,
   highlightedLayerId: null,
   drawingColor: { r: 0, g: 0, b: 0, a: 255 },
   modelType: 'steve',
@@ -811,6 +816,8 @@ export const useEditorStore = create<EditorState>()(
     return { activeTool: tool };
   }),
   restorePreviousTool: () => set((state) => ({ activeTool: state.previousTool })),
+  startLayerColorPick: (layerId) => set({ layerColorPickTarget: layerId }),
+  endLayerColorPick: () => set({ layerColorPickTarget: null }),
   setActiveLayer: (layerId) => set({ activeLayerId: layerId }),
   setHighlightedLayer: (layerId) => set({ highlightedLayerId: layerId }),
   setDrawingColor: (color) => set({ drawingColor: color }),
@@ -1556,6 +1563,7 @@ export const useEditorStore = create<EditorState>()(
       activeLayerId: null,
       activeTool: 'pencil',
       previousTool: 'pencil',
+      layerColorPickTarget: null,
       highlightedLayerId: null,
       history: [],
       historyIndex: -1,

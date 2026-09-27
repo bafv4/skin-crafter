@@ -17,7 +17,7 @@ import {
   TooltipTrigger,
 } from '@components/ui/tooltip';
 import { Popover, PopoverContent, PopoverTrigger } from '@components/ui/popover';
-import { ZoomIn, ZoomOut, RotateCw, Grid3X3 } from 'lucide-react';
+import { ZoomIn, ZoomOut, RotateCw, Grid3X3, Pipette } from 'lucide-react';
 import { ViewHint, type HintItem } from './ViewHint';
 import { CanvasBackgroundPicker, CanvasBackgroundSwatch, CHECKER_COLORS } from './CanvasBackgroundPicker';
 
@@ -53,6 +53,26 @@ export function Canvas2D() {
   const drawingColor = useEditorStore((state) => state.drawingColor);
   const previewVersion = useEditorStore((state) => state.previewVersion);
   const canvasBackground = useEditorStore((state) => state.canvasBackground);
+  const layerColorPickTarget = useEditorStore((state) => state.layerColorPickTarget);
+  const endLayerColorPick = useEditorStore((state) => state.endLayerColorPick);
+  const pickTargetLayerName = useEditorStore((state) =>
+    state.layerColorPickTarget ? state.layers.find((l) => l.id === state.layerColorPickTarget)?.name ?? null : null
+  );
+
+  // 基本色の取得中は Esc でキャンセル（ダイアログに戻る）
+  useEffect(() => {
+    if (!layerColorPickTarget) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') endLayerColorPick();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [layerColorPickTarget, endLayerColorPick]);
+
+  // 対象レイヤーが削除された場合は取得モードを終了
+  useEffect(() => {
+    if (layerColorPickTarget && pickTargetLayerName === null) endLayerColorPick();
+  }, [layerColorPickTarget, pickTargetLayerName, endLayerColorPick]);
 
   // Only get layers when needed for highlight or active layer info (not for rendering)
   const layers = useEditorStore((state) => state.layers);
@@ -251,6 +271,18 @@ export function Canvas2D() {
       const pos = getPixelFromMouse(e.nativeEvent, canvas, scale);
       if (!pos) return;
 
+      // レイヤー設定の基本色をキャンバスから取得中
+      const pickTarget = useEditorStore.getState().layerColorPickTarget;
+      if (pickTarget) {
+        const pixel = useEditorStore.getState().getComposite()[pos.y][pos.x];
+        if (pixel.a > 0) {
+          useEditorStore.getState().updateLayerColor(pickTarget, { ...pixel });
+          // 取得したらレイヤー設定ダイアログに戻る
+          endLayerColorPick();
+        }
+        return;
+      }
+
       if (activeTool === 'eyedropper') {
         // Pick color from composite
         const composite = useEditorStore.getState().getComposite();
@@ -276,7 +308,7 @@ export function Canvas2D() {
       setPixel(pos.x, pos.y, color);
       drawPixelDirect(canvas, pos.x, pos.y, color);
     },
-    [activeTool, scale, setPixel, setDrawingColor, panOffset, getDrawColor, drawPixelDirect]
+    [activeTool, scale, setPixel, setDrawingColor, panOffset, getDrawColor, drawPixelDirect, endLayerColorPick]
   );
 
   const handleMouseMove = useCallback(
@@ -365,6 +397,7 @@ export function Canvas2D() {
   // Get cursor style
   const getCursor = () => {
     if (isPanning) return 'grabbing';
+    if (layerColorPickTarget) return 'crosshair';
     switch (activeTool) {
       case 'eyedropper':
         return 'crosshair';
@@ -521,6 +554,22 @@ export function Canvas2D() {
             )}
           </div>
         </div>
+        {layerColorPickTarget && (
+          <div className="absolute inset-x-2 top-2 z-20 flex justify-center">
+            <div
+              role="status"
+              className="flex items-center gap-3 rounded-md border border-primary bg-card px-3 py-2 text-xs shadow-md"
+            >
+              <Pipette className="h-4 w-4 shrink-0 text-primary" />
+              <span>
+                「{pickTargetLayerName}」の基本色を選択中：色の付いた部分をクリック
+              </span>
+              <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={endLayerColorPick}>
+                キャンセル（Esc）
+              </Button>
+            </div>
+          </div>
+        )}
         <ViewHint items={getHintItems(activeTool)} storageKey="skin-crafter:hint-2d" />
       </div>
     </div>
