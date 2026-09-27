@@ -2,7 +2,7 @@
 // レイヤーパネルのドラッグ＆ドロップ（並べ替え・グループ間の移動）と履歴のテスト
 import 'fake-indexeddb/auto';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 vi.mock('../../lib/pixelEngine', () => import('../../test/pixelEngineMock'));
 
@@ -498,5 +498,42 @@ describe('レイヤー設定のノイズ', () => {
 
     dialog = await openSettings('A');
     expect(noiseSliders().map((el) => el.getAttribute('aria-valuenow'))).toEqual(set);
+  });
+
+  it('ノイズの生成とリセットは、それぞれ元に戻せる（ピクセル・設定・スライダーが戻る）', async () => {
+    const layer = makeLayer('A', 0);
+    layer.layerType = 'singleColor';
+    layer.baseColor = { r: 120, g: 120, b: 120, a: 255 };
+    for (let x = 0; x < 8; x++) layer.pixels[0][x] = { ...layer.baseColor };
+    useEditorStore.setState({ layers: [layer] });
+    render(<GroupPanel />);
+    const pixels = () => JSON.stringify(s().layers[0].pixels[0].slice(0, 8));
+    const original = pixels();
+
+    const dialog = await openSettings('A');
+    const [brightness] = noiseSliders();
+    for (let i = 0; i < 60; i++) fireEvent.keyDown(brightness, { key: 'ArrowLeft' }); // -60
+    fireEvent.click(within(dialog).getByRole('button', { name: /生成/ }));
+    const noisy = pixels();
+    expect(noisy).not.toBe(original);
+    expect(s().history).toHaveLength(1);
+
+    // リセット → 元に戻す: ノイズのかかったピクセルと設定に戻る
+    fireEvent.click(within(dialog).getByRole('button', { name: /リセット/ }));
+    expect(pixels()).toBe(original);
+    expect(s().history).toHaveLength(2);
+    act(() => s().undo());
+    expect(pixels()).toBe(noisy);
+    expect(s().layers[0].noiseSettings.brightness).toBeLessThan(0);
+    expect(noiseSliders()[0].getAttribute('aria-valuenow')).toBe('-60');
+
+    // 生成 → 元に戻す: 元のピクセルと設定、スライダーの位置に戻る
+    act(() => s().undo());
+    expect(pixels()).toBe(original);
+    expect(s().layers[0].noiseSettings).toMatchObject({ brightness: 0, hue: 0 });
+    expect(noiseSliders()[0].getAttribute('aria-valuenow')).toBe('0');
+
+    act(() => s().redo());
+    expect(pixels()).toBe(noisy);
   });
 });

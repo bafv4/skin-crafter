@@ -482,6 +482,7 @@ function LayerDetailDialog({
   );
   const applyNoise = useEditorStore((state) => state.applyNoise);
   const resetNoise = useEditorStore((state) => state.resetNoise);
+  const recordHistory = useEditorStore((state) => state.recordHistory);
   const updateLayerType = useEditorStore((state) => state.updateLayerType);
   const updateLayerColor = useEditorStore((state) => state.updateLayerColor);
   const saveToHistory = useEditorStore((state) => state.saveToHistory);
@@ -504,12 +505,21 @@ function LayerDetailDialog({
   useEffect(() => {
     if (open && layer) {
       setEditName(layer.name);
-      // Convert stored log values back to linear slider positions
-      setBrightnessSlider(logToLinear(layer.noiseSettings.brightness ?? 0));
-      setHueSlider(logToLinear(layer.noiseSettings.hue ?? 0));
-      setMaterial(layer.noiseSettings.material ?? 'other');
     }
   }, [open, layer?.id]);
+
+  // ノイズのスライダーは、開いたときと適用済みの設定が変わったとき（元に戻すなど）に合わせる
+  const appliedBrightness = layer?.noiseSettings.brightness ?? 0;
+  const appliedHue = layer?.noiseSettings.hue ?? 0;
+  const appliedMaterial = layer?.noiseSettings.material ?? 'other';
+  useEffect(() => {
+    if (open) {
+      // Convert stored log values back to linear slider positions
+      setBrightnessSlider(logToLinear(appliedBrightness));
+      setHueSlider(logToLinear(appliedHue));
+      setMaterial(appliedMaterial);
+    }
+  }, [open, layer?.id, appliedBrightness, appliedHue, appliedMaterial]);
 
   if (!layer) return null;
 
@@ -520,11 +530,12 @@ function LayerDetailDialog({
   const handleApplyNoise = () => {
     const brightnessDir = brightness >= 0 ? 'positive' : 'negative';
     const hueDir = hue >= 0 ? 'positive' : 'negative';
-    applyNoise(layerId, Math.abs(brightness), Math.abs(hue), brightnessDir, hueDir, material);
+    // ノイズの生成・リセットは 1 回の操作として履歴に残す（元に戻すでピクセルと設定が戻る）
+    recordHistory(() => applyNoise(layerId, Math.abs(brightness), Math.abs(hue), brightnessDir, hueDir, material));
   };
 
   const handleResetNoise = () => {
-    resetNoise(layerId);
+    recordHistory(() => resetNoise(layerId));
     setBrightnessSlider(0);
     setHueSlider(0);
   };

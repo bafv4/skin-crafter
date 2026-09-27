@@ -336,6 +336,7 @@ function calculateDiff(
       oldLayer.baseColor.a !== newLayer.baseColor.a ||
       oldLayer.noiseSettings.brightness !== newLayer.noiseSettings.brightness ||
       oldLayer.noiseSettings.hue !== newLayer.noiseSettings.hue ||
+      oldLayer.noiseSettings.material !== newLayer.noiseSettings.material ||
       oldLayer.groupId !== newLayer.groupId ||
       oldLayer.order !== newLayer.order ||
       oldLayer.layerType !== newLayer.layerType ||
