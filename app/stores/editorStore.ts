@@ -673,6 +673,10 @@ function createIdbPersistStorage(): PersistStorage<PersistedState> {
   let pending: { name: string; value: StorageValue<PersistedState> } | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let pendingSince = 0;
+  // 初回の読み込み（hydration）が終わるまでは一切書き込まない。
+  // 読み込み前の set()（初回描画の compositeCache など）で初期状態が保存済みデータを
+  // 上書きしてしまうのを防ぐ（永続化対象は読み込み後に保存済みの値で置き換えられる）
+  let hydrated = false;
 
   const cancelPending = () => {
     if (timer !== null) {
@@ -687,7 +691,7 @@ function createIdbPersistStorage(): PersistStorage<PersistedState> {
       clearTimeout(timer);
       timer = null;
     }
-    if (!pending) return;
+    if (!pending || !hydrated) return;
     const { name, value } = pending;
     pending = null;
     const json = JSON.stringify(value);
@@ -722,23 +726,28 @@ function createIdbPersistStorage(): PersistStorage<PersistedState> {
 
   return {
     getItem: async (name) => {
-      const json = await idbRequest<string | undefined>('readonly', (store) => store.get(name));
-      if (typeof json !== 'string') return null;
-      const value = JSON.parse(json) as StorageValue<PersistedState>;
-      // 読み込み完了前の set() で積まれた書き込み（初期状態）は、保存済みの内容を
-      // 上書きしてしまうので破棄する（永続化対象はこの後、読み込んだ値で置き換えられる）
-      cancelPending();
-      // 読み込んだ内容をそのまま書き戻さないよう、変更検出の基準にする
-      // （persist の merge は読み込んだオブジェクトをそのままストアに入れる）
-      lastWritten = json;
-      lastSeen = value.state;
-      return value;
+      try {
+        const json = await idbRequest<string | undefined>('readonly', (store) => store.get(name));
+        if (typeof json !== 'string') return null;
+        const value = JSON.parse(json) as StorageValue<PersistedState>;
+        // 読み込み完了前に積まれた書き込み（初期状態）は破棄する
+        cancelPending();
+        // 読み込んだ内容をそのまま書き戻さないよう、変更検出の基準にする
+        // （persist の merge は読み込んだオブジェクトをそのままストアに入れる）
+        lastWritten = json;
+        lastSeen = value.state;
+        return value;
+      } finally {
+        hydrated = true;
+        // 保存データがなかった（初回訪問）・読み込みに失敗した場合は、積まれていた書き込みを行う
+        if (pending) schedule();
+      }
     },
     setItem: (name, value) => {
       if (lastSeen && isSamePersistedState(lastSeen, value.state)) return;
       lastSeen = value.state;
       pending = { name, value };
-      schedule();
+      if (hydrated) schedule();
     },
     removeItem: (name) => {
       cancelPending();
@@ -1749,6 +1758,13 @@ export const useEditorStore = create<EditorState>()(
         showLayer2: state.showLayer2,
         preservePixels: state.preservePixels,
         canvasBackground: state.canvasBackground,
+      }),
+      // 読み込み前に計算された（空の）合成結果が残らないよう、キャッシュを捨てて再描画させる
+      merge: (persistedState, currentState) => ({
+        ...currentState,
+        ...(persistedState as Partial<PersistedState> | undefined),
+        compositeCache: null,
+        previewVersion: currentState.previewVersion + 1,
       }),
       onRehydrateStorage: () => (state) => {
         if (state?.layers && state.layers.length > 0) {
