@@ -159,3 +159,23 @@ describe('Skin Crafter について', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 });
+
+describe('狭い画面用の「ファイル」メニュー', () => {
+  it('プロジェクトの書き出しとリセットの確認ダイアログを開ける', async () => {
+    s().createLayer('肌', RED, 'singleColor');
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:test');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    render(<Header />);
+    const openMenu = () =>
+      fireEvent.pointerDown(screen.getByRole('button', { name: 'ファイル' }), { button: 0, ctrlKey: false, pointerType: 'mouse' });
+
+    openMenu();
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'プロジェクトを書き出す' }));
+    expect(click).toHaveBeenCalledTimes(1);
+
+    openMenu();
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'リセット' }));
+    expect(await screen.findByRole('alertdialog', { name: '編集をリセット' })).toBeTruthy();
+  });
+});

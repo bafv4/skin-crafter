@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Moon, Sun, Download, Upload, RotateCcw, FileJson, PersonStanding, Image } from 'lucide-react';
+import { Moon, Sun, Download, Upload, RotateCcw, FileJson, PersonStanding, Image, Menu } from 'lucide-react';
 import { Button } from '@components/ui/button';
 import { ButtonGroup } from '@components/ui/button-group';
 import {
@@ -18,6 +18,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@components/ui/alert-dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@components/ui/dropdown-menu';
 import { CraftingTableIcon } from '@components/icons/CraftingTableIcon';
 import { AboutDialog } from './AboutDialog';
 import { useEditorStore } from '../../stores/editorStore';
@@ -334,9 +342,9 @@ export function Header() {
 
   return (
     <TooltipProvider>
-      <header className="flex h-14 items-center justify-between border-b border-border bg-card px-4">
+      <header className="flex h-14 items-center justify-between gap-2 border-b border-border bg-card px-4">
         {/* タイトルをクリックすると「Skin Crafter について」を開く */}
-        <h1 className="text-xl font-bold text-foreground">
+        <h1 className="shrink-0 text-xl font-bold text-foreground">
           <button
             type="button"
             className="flex items-center gap-3 whitespace-nowrap rounded-md -mx-1 px-1 hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -345,12 +353,13 @@ export function Header() {
             title="Skin Crafter について"
           >
             <CraftingTableIcon className="h-8 w-8" />
-            Skin Crafter
+            {/* 狭い画面ではアイコンだけにする（読み上げ用の名前は残す） */}
+            <span className="max-[459px]:sr-only">Skin Crafter</span>
           </button>
         </h1>
         <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} />
 
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           <input
             ref={fileInputRef}
             type="file"
@@ -368,7 +377,7 @@ export function Header() {
 
           {/* Model Type Toggle */}
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1 text-xs text-muted-foreground">
+            <div className="hidden items-center gap-1 text-xs text-muted-foreground lg:flex">
               <PersonStanding className="h-4 w-4" />
               <span>モデル</span>
             </div>
@@ -406,13 +415,13 @@ export function Header() {
           </ButtonGroup>
           </div>
 
-          <div className="mx-1 h-6 w-px bg-border" />
+          <div className="mx-1 hidden h-6 w-px bg-border md:block" />
 
-          {/* PNG Import/Export */}
-          <div className="flex items-center gap-2">
+          {/* PNG Import/Export（狭い画面では下の「ファイル」メニューにまとめる） */}
+          <div className="hidden items-center gap-2 md:flex">
             <div className="flex items-center gap-1 text-xs text-muted-foreground">
               <Image className="h-3.5 w-3.5" />
-              <span>PNG</span>
+              <span className="hidden lg:inline">PNG</span>
             </div>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -436,13 +445,13 @@ export function Header() {
             </Tooltip>
           </div>
 
-          <div className="mx-1 h-6 w-px bg-border" />
+          <div className="mx-1 hidden h-6 w-px bg-border md:block" />
 
           {/* JSON Project Import/Export */}
-          <div className="flex items-center gap-2">
+          <div className="hidden items-center gap-2 md:flex">
             <div className="flex items-center gap-1 text-xs text-muted-foreground">
               <FileJson className="h-3.5 w-3.5" />
-              <span>JSON</span>
+              <span className="hidden lg:inline">JSON</span>
             </div>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -466,11 +475,11 @@ export function Header() {
             </Tooltip>
           </div>
 
-          <div className="mx-1 h-6 w-px bg-border" />
+          <div className="mx-1 hidden h-6 w-px bg-border md:block" />
 
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setResetDialogOpen(true)}>
+              <Button variant="outline" size="icon" className="hidden h-8 w-8 md:inline-flex" onClick={() => setResetDialogOpen(true)}>
                 <RotateCcw className="h-4 w-4" />
               </Button>
             </TooltipTrigger>
@@ -478,6 +487,41 @@ export function Header() {
               <p>リセット</p>
             </TooltipContent>
           </Tooltip>
+
+          {/* 狭い画面用: 読み込み・書き出し・リセットをまとめたメニュー */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="icon" className="h-8 w-8 md:hidden" aria-label="ファイル">
+                <Menu className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-60">
+              <DropdownMenuLabel className="text-xs text-muted-foreground">PNG</DropdownMenuLabel>
+              <DropdownMenuItem onSelect={handleImport}>
+                <Upload className="h-4 w-4" />
+                PNGを読み込む
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={handleExport}>
+                <Download className="h-4 w-4" />
+                PNGを書き出す
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="text-xs text-muted-foreground">プロジェクト (JSON)</DropdownMenuLabel>
+              <DropdownMenuItem onSelect={handleImportJson}>
+                <Upload className="h-4 w-4" />
+                プロジェクトを読み込む
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={handleExportJson}>
+                <Download className="h-4 w-4" />
+                プロジェクトを書き出す
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem variant="destructive" onSelect={() => setResetDialogOpen(true)}>
+                <RotateCcw className="h-4 w-4" />
+                リセット
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
 
           <AlertDialog open={resetDialogOpen} onOpenChange={setResetDialogOpen}>
             <AlertDialogContent>
@@ -499,7 +543,7 @@ export function Header() {
             </AlertDialogContent>
           </AlertDialog>
 
-          <div className="mx-2 h-6 w-px bg-border" />
+          <div className="mx-1 hidden h-6 w-px bg-border md:block lg:mx-2" />
 
           <Tooltip>
             <TooltipTrigger asChild>
