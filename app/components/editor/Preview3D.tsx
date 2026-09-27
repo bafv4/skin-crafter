@@ -9,9 +9,11 @@ import {
   TooltipTrigger,
 } from '@components/ui/tooltip';
 import { Popover, PopoverContent, PopoverTrigger } from '@components/ui/popover';
-import { Eye, EyeOff, RotateCcw, Pause, ZoomIn, ZoomOut, RotateCw, PersonStanding } from 'lucide-react';
+import { Eye, EyeOff, RotateCcw, Pause, ZoomIn, ZoomOut, RotateCw, PersonStanding, Footprints } from 'lucide-react';
 import { Preview3DCanvas, DEFAULT_PART_VISIBILITY, BODY_PART_KEYS, type PartVisibility } from './Preview3D.client';
 import { PartVisibilityPicker } from './PartVisibilityPicker';
+import { PosePicker } from './PosePicker';
+import { DEFAULT_POSE, isDefaultPose, type Pose } from '../../lib/pose';
 import { ViewHint, type HintItem } from './ViewHint';
 
 // OrbitControls の設定（Preview3D.client.tsx）に対応
@@ -28,6 +30,7 @@ export function Preview3D() {
   const [zoom, setZoom] = useState(1);
   const [resetKey, setResetKey] = useState(0);
   const [partVisibility, setPartVisibility] = useState<PartVisibility>(DEFAULT_PART_VISIBILITY);
+  const [pose, setPose] = useState<Pose>(DEFAULT_POSE);
   const hasHiddenParts = BODY_PART_KEYS.some(
     (key) => !partVisibility[key].inner || !partVisibility[key].outer
   );
@@ -122,6 +125,24 @@ export function Preview3D() {
                 <PartVisibilityPicker visibility={partVisibility} onChange={setPartVisibility} />
               </PopoverContent>
             </Popover>
+            <Popover>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <PopoverTrigger asChild>
+                    <Button variant={isDefaultPose(pose) ? 'outline' : 'default'} size="sm">
+                      <Footprints className="mr-1 h-3 w-3" />
+                      ポーズ
+                    </Button>
+                  </PopoverTrigger>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>頭・腕・足の角度でポーズをつける</p>
+                </TooltipContent>
+              </Tooltip>
+              <PopoverContent align="end" className="w-80 max-w-[calc(100vw-1rem)]">
+                <PosePicker pose={pose} onChange={setPose} />
+              </PopoverContent>
+            </Popover>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -147,6 +168,7 @@ export function Preview3D() {
           onZoomChange={setZoom}
           resetKey={resetKey}
           partVisibility={partVisibility}
+          pose={pose}
         />
         <ViewHint items={HINT_ITEMS} storageKey="skin-crafter:hint-3d" />
       </div>

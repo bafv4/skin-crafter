@@ -1,9 +1,10 @@
-import { useRef, useEffect, useMemo } from 'react';
+import { useRef, useEffect, useMemo, type ReactNode } from 'react';
 import { Canvas, useFrame, invalidate } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { useEditorStore } from '../../stores/editorStore';
 import { SKIN_WIDTH, SKIN_HEIGHT, type ModelType, type RGBA } from '../../types/editor';
+import { DEFAULT_POSE, poseToRotation, type Pose, type PosePartKey } from '../../lib/pose';
 
 // Body parts that can be toggled individually in the 3D preview
 export type BodyPartKey = 'head' | 'body' | 'rightArm' | 'leftArm' | 'rightLeg' | 'leftLeg';
@@ -275,11 +276,30 @@ function BodyPart({
   );
 }
 
+// 関節: pivot（モデル座標）を中心に子のパーツを回転させる。子の位置もモデル座標で指定する
+function Joint({ pivot, rotation, children }: {
+  pivot: [number, number, number];
+  rotation: [number, number, number];
+  children: ReactNode;
+}) {
+  return (
+    <group position={pivot} rotation={rotation}>
+      <group position={[-pivot[0], -pivot[1], -pivot[2]]}>{children}</group>
+    </group>
+  );
+}
+
+// 胴体の上端・下端（首・腰の高さ）。腕の付け根は Minecraft と同じく上端から 2px 下
+const BODY_TOP = 1.125;
+const BODY_BOTTOM = -0.375;
+const SHOULDER_Y = BODY_TOP - 2 / 8;
+
 // Minecraft character model
-function MinecraftCharacter({ modelType, autoRotate, partVisibility }: {
+function MinecraftCharacter({ modelType, autoRotate, partVisibility, pose }: {
   modelType: ModelType;
   autoRotate: boolean;
   partVisibility: PartVisibility;
+  pose: Pose;
 }) {
   const texture = useSkinTexture();
   const showLayer2 = useEditorStore((state) => state.showLayer2);
@@ -288,7 +308,9 @@ function MinecraftCharacter({ modelType, autoRotate, partVisibility }: {
   // Re-render on demand when part visibility changes
   useEffect(() => {
     invalidate();
-  }, [partVisibility, showLayer2]);
+  }, [partVisibility, showLayer2, pose]);
+
+  const rotationOf = (part: PosePartKey) => poseToRotation(part, pose[part]);
 
   const partProps = (key: BodyPartKey) => ({
     layer2Extra: LAYER2_EXTRA[key],
@@ -348,6 +370,7 @@ function MinecraftCharacter({ modelType, autoRotate, partVisibility }: {
   return (
     <group ref={groupRef} position={[0, 0, 0]}>
       {/* Head */}
+      <Joint pivot={[0, BODY_TOP, 0]} rotation={rotationOf('head')}>
       <BodyPart
         position={[0, 1.595, 0]}
         size={[1, 1, 1]}
@@ -370,6 +393,7 @@ function MinecraftCharacter({ modelType, autoRotate, partVisibility }: {
         texture={texture}
         {...partProps('head')}
       />
+      </Joint>
 
       {/* Body */}
       <BodyPart
@@ -396,26 +420,31 @@ function MinecraftCharacter({ modelType, autoRotate, partVisibility }: {
       />
 
       {/* Right Arm */}
-      <BodyPart
-        position={[-0.5 - armWidth / 2, 0.375, 0]}
-        size={[armWidth, 1.5, 0.5]}
-        uvMap={rightArmUvMap}
-        layer2UvMap={rightArmLayer2UvMap}
-        texture={texture}
-        {...partProps('rightArm')}
-      />
+      <Joint pivot={[-0.5 - armWidth / 2, SHOULDER_Y, 0]} rotation={rotationOf('rightArm')}>
+        <BodyPart
+          position={[-0.5 - armWidth / 2, 0.375, 0]}
+          size={[armWidth, 1.5, 0.5]}
+          uvMap={rightArmUvMap}
+          layer2UvMap={rightArmLayer2UvMap}
+          texture={texture}
+          {...partProps('rightArm')}
+        />
+      </Joint>
 
       {/* Left Arm */}
-      <BodyPart
-        position={[0.5 + armWidth / 2, 0.375, 0]}
-        size={[armWidth, 1.5, 0.5]}
-        uvMap={leftArmUvMap}
-        layer2UvMap={leftArmLayer2UvMap}
-        texture={texture}
-        {...partProps('leftArm')}
-      />
+      <Joint pivot={[0.5 + armWidth / 2, SHOULDER_Y, 0]} rotation={rotationOf('leftArm')}>
+        <BodyPart
+          position={[0.5 + armWidth / 2, 0.375, 0]}
+          size={[armWidth, 1.5, 0.5]}
+          uvMap={leftArmUvMap}
+          layer2UvMap={leftArmLayer2UvMap}
+          texture={texture}
+          {...partProps('leftArm')}
+        />
+      </Joint>
 
       {/* Right Leg */}
+      <Joint pivot={[-0.25, BODY_BOTTOM, 0]} rotation={rotationOf('rightLeg')}>
       <BodyPart
         position={[-0.25, LEG_Y, 0]}
         size={LEG_SIZE}
@@ -438,8 +467,10 @@ function MinecraftCharacter({ modelType, autoRotate, partVisibility }: {
         texture={texture}
         {...partProps('rightLeg')}
       />
+      </Joint>
 
       {/* Left Leg */}
+      <Joint pivot={[0.25, BODY_BOTTOM, 0]} rotation={rotationOf('leftLeg')}>
       <BodyPart
         position={[0.25, LEG_Y, 0]}
         size={LEG_SIZE}
@@ -462,14 +493,16 @@ function MinecraftCharacter({ modelType, autoRotate, partVisibility }: {
         texture={texture}
         {...partProps('leftLeg')}
       />
+      </Joint>
     </group>
   );
 }
 
 // Scene setup
-function Scene({ autoRotate, zoom, onZoomChange, resetKey, partVisibility }: {
+function Scene({ autoRotate, zoom, onZoomChange, resetKey, partVisibility, pose }: {
   autoRotate: boolean;
   partVisibility: PartVisibility;
+  pose: Pose;
   zoom: number;
   onZoomChange?: (zoom: number) => void;
   resetKey: number;
@@ -530,7 +563,7 @@ function Scene({ autoRotate, zoom, onZoomChange, resetKey, partVisibility }: {
 
   return (
     <>
-      <MinecraftCharacter modelType={modelType} autoRotate={autoRotate} partVisibility={partVisibility} />
+      <MinecraftCharacter modelType={modelType} autoRotate={autoRotate} partVisibility={partVisibility} pose={pose} />
       <OrbitControls
         ref={controlsRef}
         enablePan={true}
@@ -573,12 +606,14 @@ export function Preview3DCanvas({
   onZoomChange,
   resetKey = 0,
   partVisibility,
+  pose = DEFAULT_POSE,
 }: {
   autoRotate?: boolean;
   zoom?: number;
   onZoomChange?: (zoom: number) => void;
   resetKey?: number;
   partVisibility: PartVisibility;
+  pose?: Pose;
 }) {
   return (
     <Canvas
@@ -588,7 +623,7 @@ export function Preview3DCanvas({
       flat
     >
       <RenderController autoRotate={autoRotate} />
-      <Scene autoRotate={autoRotate} zoom={zoom} onZoomChange={onZoomChange} resetKey={resetKey} partVisibility={partVisibility} />
+      <Scene autoRotate={autoRotate} zoom={zoom} onZoomChange={onZoomChange} resetKey={resetKey} partVisibility={partVisibility} pose={pose} />
     </Canvas>
   );
 }
