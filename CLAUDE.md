@@ -39,6 +39,10 @@ Skin Crafter はブラウザベースの Minecraft スキンエディタ。React
 
 **パスエイリアス:** `@components/*` → `./app/components/*`、`@lib/*` → `./app/lib/*`（tsconfig paths）。
 
+## ブランチ運用
+
+作業は `dev` ブランチで行い、コミット・プッシュも `dev` に対して行う。`main` へのプッシュは本番デプロイを伴うため、直接コミットしない。
+
 ## デプロイ
 
 Vercel にデプロイ。GitHub の main ブランチにプッシュすると自動でデプロイされる。
