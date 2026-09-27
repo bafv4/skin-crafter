@@ -945,10 +945,11 @@ describe('mergeLayers', () => {
     expect(merged.pixels[1][3]).toEqual(BLUE);
   });
 
-  it('重なるピクセルは統合元（上に描かれる側）が優先される', () => {
+  it('重なるピクセルは重なり順どおり: 統合元が奥なら手前の統合先の色が上になる', () => {
     const { layers } = setup();
+    // 統合先は order 0（手前）、統合元は order 2（奥）
     const merged = mergeLayers(layers, 'source', 'target').layers[0];
-    expect(merged.pixels[1][2]).toEqual(BLUE);
+    expect(merged.pixels[1][2]).toEqual(RED);
   });
 
   it('統合元のアルファ 0 のピクセルは取り込まない', () => {
@@ -968,6 +969,106 @@ describe('mergeLayers', () => {
     const result = mergeLayers(layers, 'source', 'target');
     expect(result.layers[1]).toEqual(other);
     expect(result.layers[1].pixels).not.toBe(other.pixels);
+  });
+
+  it('統合元が手前なら統合元の色が上になる', () => {
+    const { target, other, source } = setup();
+    const layers = [{ ...target, order: 2 }, other, { ...source, order: 0 }];
+    const merged = mergeLayers(layers, 'source', 'target').layers.find((l) => l.id === 'target')!;
+    expect(merged.pixels[1][2]).toEqual(BLUE);
+    // 統合先の重なり位置は変わらない
+    expect(merged.order).toBe(2);
+  });
+
+  it('グループの順番も重なり順に含める（手前のグループのレイヤーが上になる）', () => {
+    const { target, other, source } = setup();
+    const groups = [
+      { id: 'front-group', name: '手前', collapsed: false, order: 0, visible: true },
+      { id: 'back-group', name: '奥', collapsed: false, order: 1, visible: true },
+    ];
+    // layer の order は統合先の方が小さいが、統合元のグループの方が手前
+    const layers = [
+      { ...target, order: 0, groupId: 'back-group' },
+      other,
+      { ...source, order: 5, groupId: 'front-group' },
+    ];
+    const merged = mergeLayers(layers, 'source', 'target', groups).layers.find((l) => l.id === 'target')!;
+    expect(merged.pixels[1][2]).toEqual(BLUE);
+  });
+
+  it('半透明のピクセルは通常の合成と同じ計算で重ねる', () => {
+    const back = makeLayer({ id: 'back', order: 1, pixels: pixelsWith([[5, 5, rgba(0, 0, 255)]]) });
+    const front = makeLayer({ id: 'front', order: 0, pixels: pixelsWith([[5, 5, rgba(255, 0, 0, 128)]]) });
+    const expected = computeLayerComposite([back, front], [])[5][5];
+
+    const merged = mergeLayers([back, front], 'front', 'back').layers[0];
+
+    expect(merged.pixels[5][5]).toEqual(expected);
+  });
+
+  it('各レイヤーの不透明度はピクセルに焼き込み、統合後の不透明度は 100% になる', () => {
+    const back = makeLayer({ id: 'back', order: 1, opacity: 60, pixels: pixelsWith([[5, 5, rgba(0, 0, 255)], [6, 5, GREEN]]) });
+    const front = makeLayer({ id: 'front', order: 0, opacity: 50, pixels: pixelsWith([[5, 5, rgba(255, 0, 0)]]) });
+    const before = computeLayerComposite([back, front], []);
+
+    const merged = mergeLayers([back, front], 'front', 'back').layers[0];
+
+    expect(merged.opacity).toBe(100);
+    expect(merged.pixels[5][5]).toEqual(before[5][5]);
+    expect(merged.pixels[5][6]).toEqual(before[5][6]);
+    expect(computeLayerComposite([merged], [])).toEqual(before);
+  });
+
+  // ランダムな重なり・グループで、描画順が隣り合う 2 枚を統合したときの合成結果の最大差
+  function mergeAdjacentMaxDiff(seed: number, opacities: number[]): number {
+    const rand = lcg(seed);
+    const int = (n: number) => Math.floor(rand() * n);
+    const groups = [
+      { id: 'g1', name: 'g1', collapsed: false, order: 0, visible: true },
+      { id: 'g2', name: 'g2', collapsed: false, order: 1, visible: true },
+    ];
+    const layers = Array.from({ length: 5 }, (_, i) => {
+      const entries: Array<[number, number, RGBA]> = [];
+      for (let k = 0; k < 40; k++) entries.push([int(8), int(8), rgba(int(256), int(256), int(256), 255)]);
+      return makeLayer({
+        id: `L${i}`,
+        order: int(4),
+        groupId: [null, 'g1', 'g2'][int(3)],
+        opacity: opacities[int(opacities.length)],
+        pixels: pixelsWith(entries),
+      });
+    });
+    const before = computeLayerComposite(layers, groups);
+    // 実際の描画順（奥 → 手前）で隣り合う 2 枚を選ぶ（どちらを統合先にするかもランダム）
+    const drawOrder = drawingOrder(layers, groups);
+    const i = int(drawOrder.length - 1);
+    const [backId, frontId] = [drawOrder[i], drawOrder[i + 1]];
+    const [sourceId, targetId] = int(2) === 0 ? [backId, frontId] : [frontId, backId];
+
+    const after = computeLayerComposite(mergeLayers(layers, sourceId, targetId, groups).layers, groups);
+
+    let maxDiff = 0;
+    for (let y = 0; y < SKIN_HEIGHT; y++) {
+      for (let x = 0; x < SKIN_WIDTH; x++) {
+        for (const c of ['r', 'g', 'b', 'a'] as const) {
+          maxDiff = Math.max(maxDiff, Math.abs(after[y][x][c] - before[y][x][c]));
+        }
+      }
+    }
+    return maxDiff;
+  }
+
+  it('描画順で隣り合う 2 枚を統合しても合成結果は変わらない（ランダムな重なり・グループ）', () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      expect(mergeAdjacentMaxDiff(seed, [100]), `seed ${seed}`).toBe(0);
+    }
+  });
+
+  it('不透明度が 100% でないレイヤーの統合でも、合成結果の差は丸めによる ±1 以内', () => {
+    // 半透明同士を先にまとめてから重ねると、順に重ねた場合と四捨五入の順序が変わるため
+    for (let seed = 1; seed <= 20; seed++) {
+      expect(mergeAdjacentMaxDiff(seed, [100, 100, 60, 25]), `seed ${seed}`).toBeLessThanOrEqual(1);
+    }
   });
 
   it('統合元と統合先が同じ ID なら何も変えない', () => {
@@ -1647,5 +1748,30 @@ describe('get3DAdjacentPixelPairs（3D で隣り合う、別の面のピクセ�
         }
       }
     }
+  });
+});
+
+// computeLayerComposite と同じ規則での描画順（奥 → 手前）
+function drawingOrder(layers: Layer[], groups: { id: string; order: number }[]): string[] {
+  const groupOrder = new Map(groups.map((g) => [g.id, g.order]));
+  const key = (l: Layer) => (l.groupId ? groupOrder.get(l.groupId) ?? Infinity : Infinity);
+  return layers
+    .map((l, index) => ({ l, index }))
+    .sort((a, b) => key(b.l) - key(a.l) || b.l.order - a.l.order || a.index - b.index)
+    .map(({ l }) => l.id);
+}
+
+describe('mergeSimilarLayers の重なり順', () => {
+  it('似た色のレイヤー同士の重なるピクセルは、手前のレイヤーの色が上になる', () => {
+    // a（奥）と b（手前）は似た色。配列では a が先
+    const a = makeLayer({ id: 'a', order: 1, baseColor: rgba(100, 100, 100), pixels: pixelsWith([[1, 1, rgba(100, 100, 100)]]) });
+    const b = makeLayer({ id: 'b', order: 0, baseColor: rgba(110, 100, 100), pixels: pixelsWith([[1, 1, rgba(110, 100, 100)]]) });
+    const before = computeLayerComposite([a, b], []);
+
+    const { layers } = mergeSimilarLayers([a, b], 30, false);
+
+    expect(layers).toHaveLength(1);
+    expect(layers[0].pixels[1][1]).toEqual(rgba(110, 100, 100));
+    expect(computeLayerComposite(layers, [])).toEqual(before);
   });
 });

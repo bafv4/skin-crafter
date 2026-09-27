@@ -1541,3 +1541,28 @@ describe('重なり順・グループを変える操作と合成結果', () => {
     expect(compositeAt(0, 0)).toEqual(BLUE);
   });
 });
+
+// ================================================================
+// 統合（重なり順どおりに合成する）
+// ================================================================
+describe('mergeLayersById と重なり順', () => {
+  it('グループの順番を含めた重なり順どおりに統合し、統合の前後で見た目が変わらない', () => {
+    // 赤（グループ外）と、手前のグループに入った青を (0,0) に重ねる → 青が見えている
+    const red = store().createLayer('赤', RED, 'direct');
+    store().setPixelRect(0, 0, 0, 0, RED);
+    const blue = store().createLayer('青', BLUE, 'direct');
+    store().setPixelRect(0, 0, 0, 0, BLUE);
+    const group = store().createLayerGroup('手前');
+    store().moveLayerToGroup(blue, group);
+    // レイヤーの order だけなら赤（0）が手前だが、グループの順番で青が手前になる
+    store().reorderLayer(blue, 3, group);
+    expect(compositeAt(0, 0)).toEqual(BLUE);
+
+    // 青（手前）を赤（奥）へ統合しても、青が上のまま
+    store().mergeLayersById(blue, red);
+
+    expect(store().layers.map((l) => l.id)).toEqual([red]);
+    expect(pixelOf(red, 0, 0)).toEqual(BLUE);
+    expect(compositeAt(0, 0)).toEqual(BLUE);
+  });
+});

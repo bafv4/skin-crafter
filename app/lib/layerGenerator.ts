@@ -1,6 +1,7 @@
 import {
   type RGBA,
   type Layer,
+  type LayerGroup,
   type LayerPixels,
   type SkinRegion,
   SKIN_WIDTH,
@@ -10,6 +11,7 @@ import {
   createEmptyLayerPixels,
   cloneLayerPixels,
 } from '../types/editor';
+import { alphaBlendMut, compareLayersBackToFront } from './layerComposite';
 
 // Color similarity threshold presets (0-441, where 441 is max distance in RGB space)
 export const COLOR_THRESHOLD_PRESETS = {
@@ -428,6 +430,55 @@ export function generateLayersFromImageData(
   return { layers };
 }
 
+// ---- レイヤーの統合（重なり順どおりに合成） ----
+
+// 不透明度を掛けた実効ピクセル（合成と同じく、アルファは整数に丸める）。見えないなら null
+function effectivePixel(pixel: RGBA | null, opacity: number): RGBA | null {
+  if (!pixel || pixel.a === 0) return null;
+  const a = opacity < 1 ? Math.round(pixel.a * opacity) : pixel.a;
+  return a === 0 ? null : { r: pixel.r, g: pixel.g, b: pixel.b, a };
+}
+
+/**
+ * 2 枚のレイヤーのピクセルを、画面の合成と同じ規則（手前を上に Porter-Duff over）で 1 枚にする。
+ * 各レイヤーの不透明度はピクセルのアルファに焼き込む（結果のレイヤーは不透明度 100% で使う）
+ */
+function composeLayerPixels(back: Layer, front: Layer): LayerPixels {
+  const result = createEmptyLayerPixels();
+  const backOpacity = (back.opacity ?? 100) / 100;
+  const frontOpacity = (front.opacity ?? 100) / 100;
+  for (let y = 0; y < SKIN_HEIGHT; y++) {
+    for (let x = 0; x < SKIN_WIDTH; x++) {
+      const b = effectivePixel(back.pixels[y][x], backOpacity);
+      const f = effectivePixel(front.pixels[y][x], frontOpacity);
+      if (!b || !f) {
+        result[y][x] = b ?? f;
+      } else {
+        alphaBlendMut(b, f);
+        result[y][x] = b.a > 0 ? b : null;
+      }
+    }
+  }
+  return result;
+}
+
+/**
+ * source を target に統合したレイヤーを返す（target の ID・名前・重なり位置などを引き継ぐ）。
+ * 重なるピクセルは画面の合成と同じく、手前のレイヤーが上になる
+ */
+function mergeLayerInto(
+  target: Layer,
+  source: Layer,
+  targetIndex: number,
+  sourceIndex: number,
+  groupOrderMap: Map<string, number>
+): Layer {
+  // 描画順が同じなら、合成と同じく配列の後ろの方が手前
+  const cmp = compareLayersBackToFront(target, source, groupOrderMap) || targetIndex - sourceIndex;
+  const [back, front] = cmp < 0 ? [target, source] : [source, target];
+  return { ...target, opacity: 100, pixels: composeLayerPixels(back, front) };
+}
+
 /**
  * Merge similar layers (optional post-processing).
  * Returns new layers with merged pixel data.
@@ -435,7 +486,8 @@ export function generateLayersFromImageData(
 export function mergeSimilarLayers(
   layers: Layer[],
   threshold: number = COLOR_SIMILARITY_THRESHOLD,
-  applyNoiseFromThreshold = true
+  applyNoiseFromThreshold = true,
+  layerGroups: LayerGroup[] = []
 ): { layers: Layer[] } {
   if (layers.length <= 1) return { layers: layers.map(l => ({ ...l, pixels: cloneLayerPixels(l.pixels) })) };
 
@@ -443,31 +495,27 @@ export function mergeSimilarLayers(
     ? calculateNoiseFromThreshold(threshold)
     : null;
 
-  // Map old layer ID to new layer (for merged layers)
-  const mergeMap = new Map<string, Layer>();
+  const groupOrderMap = new Map(layerGroups.map((g) => [g.id, g.order]));
+  // 元の配列での位置（描画順が同じ場合の前後判定に使う）
+  const indexOf = new Map(layers.map((l, i) => [l.id, i]));
   const newLayers: Layer[] = [];
 
   for (const layer of layers) {
     // Find if there's an existing layer with similar color
-    let mergedInto: Layer | null = null;
-    for (const existingLayer of newLayers) {
-      if (areColorsSimilar(layer.baseColor, existingLayer.baseColor, threshold)) {
-        mergedInto = existingLayer;
-        break;
-      }
-    }
+    const mergedIndex = newLayers.findIndex((existing) =>
+      areColorsSimilar(layer.baseColor, existing.baseColor, threshold)
+    );
 
-    if (mergedInto) {
-      // Merge pixels into the existing layer
-      for (let y = 0; y < SKIN_HEIGHT; y++) {
-        for (let x = 0; x < SKIN_WIDTH; x++) {
-          const pixel = layer.pixels[y][x];
-          if (pixel && (!mergedInto.pixels[y][x] || mergedInto.pixels[y][x]!.a === 0)) {
-            mergedInto.pixels[y][x] = { ...pixel };
-          }
-        }
-      }
-      mergeMap.set(layer.id, mergedInto);
+    if (mergedIndex >= 0) {
+      // 既存のレイヤーに重なり順どおりに統合する
+      const existing = newLayers[mergedIndex];
+      newLayers[mergedIndex] = mergeLayerInto(
+        existing,
+        layer,
+        indexOf.get(existing.id)!,
+        indexOf.get(layer.id)!,
+        groupOrderMap
+      );
     } else {
       // Create a new layer with cloned pixels
       const newLayer: Layer = {
@@ -482,7 +530,6 @@ export function mergeSimilarLayers(
         };
       }
       newLayers.push(newLayer);
-      mergeMap.set(layer.id, newLayer);
     }
   }
 
@@ -496,7 +543,8 @@ export function mergeSimilarLayers(
 export function mergeLayers(
   layers: Layer[],
   sourceLayerId: string,
-  targetLayerId: string
+  targetLayerId: string,
+  layerGroups: LayerGroup[] = []
 ): { layers: Layer[] } {
   if (sourceLayerId === targetLayerId) {
     return { layers: layers.map(l => ({ ...l, pixels: cloneLayerPixels(l.pixels) })) };
@@ -519,18 +567,11 @@ export function mergeLayers(
     }
 
     if (layer.id === targetLayerId) {
-      // Clone target layer and merge source pixels into it
-      const mergedPixels = cloneLayerPixels(layer.pixels);
-      for (let y = 0; y < SKIN_HEIGHT; y++) {
-        for (let x = 0; x < SKIN_WIDTH; x++) {
-          const sourcePixel = sourceLayer.pixels[y][x];
-          if (sourcePixel && sourcePixel.a > 0) {
-            // Source pixel takes priority (drawn on top)
-            mergedPixels[y][x] = { ...sourcePixel };
-          }
-        }
-      }
-      newLayers.push({ ...layer, pixels: mergedPixels });
+      // 重なるピクセルは画面の合成と同じく手前のレイヤーが上になるように統合する
+      const groupOrderMap = new Map(layerGroups.map((g) => [g.id, g.order]));
+      newLayers.push(
+        mergeLayerInto(layer, sourceLayer, layers.indexOf(targetLayer), layers.indexOf(sourceLayer), groupOrderMap)
+      );
     } else {
       // Clone other layers as-is
       newLayers.push({ ...layer, pixels: cloneLayerPixels(layer.pixels) });

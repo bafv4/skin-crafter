@@ -59,6 +59,18 @@ function getHiddenLayerIds(layers: Layer[], layerGroups: LayerGroup[]): Set<stri
   return hiddenLayerIds;
 }
 
+// 描画順の比較（奥のレイヤーが先）。グループの order → レイヤーの order の順に比べ、
+// どちらも大きい方が奥。グループに入っていないレイヤーはグループ内のレイヤーより奥になる。
+// 同じ値のときは 0 を返す（安定ソートで配列の後ろの要素が手前になる）
+export function compareLayersBackToFront(a: Layer, b: Layer, groupOrderMap: Map<string, number>): number {
+  const aGroupOrder = a.groupId ? (groupOrderMap.get(a.groupId) ?? Infinity) : Infinity;
+  const bGroupOrder = b.groupId ? (groupOrderMap.get(b.groupId) ?? Infinity) : Infinity;
+  if (aGroupOrder !== bGroupOrder) {
+    return bGroupOrder - aGroupOrder;
+  }
+  return b.order - a.order;
+}
+
 // Reusable temp pixel for opacity adjustment
 const tempPixel: RGBA = { r: 0, g: 0, b: 0, a: 0 };
 
@@ -102,19 +114,7 @@ export function computeLayerComposite(
 
   // Sort by group order first, then by layer order within group
   // Higher order = draw first = background
-  visibleLayers.sort((a, b) => {
-    // Get effective group order (use Infinity for ungrouped layers so they sort to back initially)
-    const aGroupOrder = a.groupId ? (groupOrderMap.get(a.groupId) ?? Infinity) : Infinity;
-    const bGroupOrder = b.groupId ? (groupOrderMap.get(b.groupId) ?? Infinity) : Infinity;
-
-    // First compare by group order (higher = background)
-    if (aGroupOrder !== bGroupOrder) {
-      return bGroupOrder - aGroupOrder;
-    }
-
-    // Within the same group (or both ungrouped), compare by layer order
-    return b.order - a.order;
-  });
+  visibleLayers.sort((a, b) => compareLayersBackToFront(a, b, groupOrderMap));
 
   // Composite from back to front
   for (let li = 0; li < visibleLayers.length; li++) {

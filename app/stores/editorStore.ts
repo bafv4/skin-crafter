@@ -1613,7 +1613,8 @@ export const useEditorStore = create<EditorState>()(
     const { layers: newLayers } = mergeLayers(
       layers,
       sourceLayerId,
-      targetLayerId
+      targetLayerId,
+      layerGroups
     );
 
     // Sync merged layers to PixelEngine
@@ -1643,7 +1644,8 @@ export const useEditorStore = create<EditorState>()(
     const { layers: newLayers } = mergeSimilarLayers(
       layers,
       finalThreshold,
-      applyNoise
+      applyNoise,
+      layerGroups
     );
 
     // Sync all new layers to PixelEngine (full rebuild)
