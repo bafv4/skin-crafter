@@ -1,6 +1,6 @@
 // editorStore の履歴（差分ベースの undo/redo）のテスト
 import 'fake-indexeddb/auto';
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Web Worker を起動しないよう PixelEngine をモックに差し替える
 vi.mock('../lib/pixelEngine', () => import('../test/pixelEngineMock'));
@@ -1252,5 +1252,120 @@ describe('reset', () => {
     expect(s().historyIndex).toBe(-1);
     expect(changesState(() => s().undo())).toBe(false);
     expect(changesState(() => s().redo())).toBe(false);
+  });
+});
+
+// ================================================================
+// レイヤー構造を変える操作（複製・統合・分割・境界ブレンド・自動生成・画像読み込み）
+// ================================================================
+describe('レイヤー構造を変える操作の undo / redo', () => {
+  // node 環境には ImageData が無いので、ストアが使う最小限の実装を用意する
+  class TestImageData {
+    readonly data: Uint8ClampedArray;
+    constructor(readonly width: number, readonly height: number) {
+      this.data = new Uint8ClampedArray(width * height * 4);
+    }
+  }
+  const globals = globalThis as unknown as { ImageData?: unknown };
+  let originalImageData: unknown;
+  beforeAll(() => {
+    originalImageData = globals.ImageData;
+    if (typeof globals.ImageData === 'undefined') globals.ImageData = TestImageData;
+  });
+  afterAll(() => {
+    globals.ImageData = originalImageData;
+  });
+
+  // 比較用: レイヤー・グループを ID 順に並べて値だけにする（配列の並び順の違いは無視）
+  function projectState() {
+    const byId = <T extends { id: string }>(items: T[]) => [...items].sort((a, b) => a.id.localeCompare(b.id));
+    return JSON.parse(JSON.stringify({ layers: byId(s().layers), layerGroups: byId(s().layerGroups) }));
+  }
+
+  function compositeState() {
+    return JSON.parse(JSON.stringify(s().getComposite()));
+  }
+
+  // 2 つのレイヤー（片方はグループ内）に描いて、1 件の履歴（ストローク）がある状態を作る
+  function setup() {
+    const groupId = s().createLayerGroup('グループ');
+    const a = createDirectLayer('A');
+    for (let y = 8; y < 12; y++) for (let x = 8; x < 12; x++) s().setPixel(x, y, RED);
+    s().setPixel(9, 9, GREEN);
+    s().commitDrawing();
+    const b = createDirectLayer('B');
+    s().moveLayerToGroup(b, groupId);
+    stroke([[12, 8], [12, 9], [13, 8], [13, 9]], BLUE);
+    return { a, b, groupId };
+  }
+
+  function imageDataFrom(paint: Array<[number, number, RGBA]>) {
+    const image = new TestImageData(SKIN_WIDTH, SKIN_HEIGHT);
+    for (const [x, y, c] of paint) {
+      const i = (y * SKIN_WIDTH + x) * 4;
+      image.data.set([c.r, c.g, c.b, c.a], i);
+    }
+    return image as unknown as ImageData;
+  }
+
+  const ACTIONS: Array<[string, (ids: { a: string; b: string }) => void]> = [
+    ['duplicateLayer（複製）', ({ a }) => { s().duplicateLayer(a); }],
+    ['mergeLayersById（統合）', ({ a, b }) => { s().mergeLayersById(b, a); }],
+    ['mergeSimilarLayersAction（似た色の統合）', () => { s().mergeSimilarLayersAction({ thresholdValue: 441, applyNoise: false }); }],
+    ['splitLayerByColorAction（色で分割）', ({ a }) => { s().splitLayerByColorAction(a, { applyNoise: false }); }],
+    ['splitLayerBySelectionAction（選択範囲で分割）', ({ a }) => { s().splitLayerBySelectionAction(a, [{ x: 8, y: 8 }, { x: 9, y: 8 }]); }],
+    ['blendBordersAction（境界ブレンド）', () => { s().blendBordersAction(50); }],
+    ['generateLayers（レイヤー自動生成）', () => { s().generateLayers({ applyNoise: false }); }],
+    ['loadFromImageData（画像の読み込み）', () => { s().loadFromImageData(imageDataFrom([[0, 0, GREEN], [1, 0, BLUE]])); }],
+  ];
+
+  it.each(ACTIONS)('%s は 1 件の履歴になり、undo で操作前に、redo で操作後に戻る', (_name, action) => {
+    const ids = setup();
+    expect(s().history).toHaveLength(2);
+    const before = projectState();
+    const beforeComposite = compositeState();
+
+    action(ids);
+    const after = projectState();
+    const afterComposite = compositeState();
+    expect(after).not.toEqual(before); // 前提: 操作で内容が変わる
+    expect(s().history).toHaveLength(3);
+    expect(s().historyIndex).toBe(2);
+
+    s().undo();
+    expect(projectState()).toEqual(before);
+    expect(compositeState()).toEqual(beforeComposite);
+    expect(s().historyIndex).toBe(1);
+
+    s().redo();
+    expect(projectState()).toEqual(after);
+    expect(compositeState()).toEqual(afterComposite);
+    expect(s().historyIndex).toBe(2);
+  });
+
+  it.each(ACTIONS)('%s の後の undo で、その前の無関係なストロークは戻らない', (_name, action) => {
+    const ids = setup();
+    action(ids);
+    s().undo();
+    // 直前のストローク（B の青）は残っている
+    expect(projectState().layers.find((l: Layer) => l.id === ids.b).pixels[8][12]).toEqual(BLUE);
+  });
+
+  it('選択範囲で分割して何も分割されなかった場合は、履歴を追加せず次のストロークにも混ざらない', () => {
+    const { a } = setup();
+    expect(s().splitLayerBySelectionAction(a, [])).toBeNull();
+    expect(s().history).toHaveLength(2);
+
+    // 履歴に残らない変更（名前変更）をしてから描く
+    s().updateLayerName(a, '新しい名前');
+    s().setActiveLayer(a);
+    stroke([[20, 20]], BLUE);
+    expect(s().history).toHaveLength(3);
+
+    // 次のストロークの undo は、そのストロークだけを戻す（分割時のスナップショットが残っていると名前も戻る）
+    s().undo();
+    expect(px(a, 20, 20)).toBeNull();
+    expect(px(a, 8, 8)).toEqual(RED);
+    expect(getLayer(a).name).toBe('新しい名前');
   });
 });

@@ -1196,13 +1196,14 @@ export const useEditorStore = create<EditorState>()(
     const engine = getPixelEngine();
     engine.duplicateLayer(layerId, newId, maxOrder + 1);
 
-    saveToHistory();
     set((state) => ({
       layers: [...state.layers, newLayer],
       activeLayerId: newId,
       compositeCache: null,
       previewVersion: state.previewVersion + 1,
     }));
+    // 変更後の状態との差分を 1 件の履歴として記録する（set より前だと差分が空になる）
+    saveToHistory();
 
     return newId;
   },
@@ -1497,7 +1498,6 @@ export const useEditorStore = create<EditorState>()(
       engine.setLayerData(layerId, 0, layerPixelsToUint8(layerPixels));
     }
 
-    saveToHistory();
     set((state) => ({
       layers: hasPixels ? [newLayer] : [],
       layerGroups: [],
@@ -1505,6 +1505,8 @@ export const useEditorStore = create<EditorState>()(
       compositeCache: null,
       previewVersion: state.previewVersion + 1,
     }));
+    // 変更後の状態との差分を 1 件の履歴として記録する（set より前だと差分が空になる）
+    saveToHistory();
   },
 
   generateLayers: (options = {}) => {
@@ -1541,13 +1543,14 @@ export const useEditorStore = create<EditorState>()(
       engine.setLayerData(layer.id, layer.order, layerPixelsToUint8(layer.pixels));
     }
 
-    saveToHistory();
     set((state) => ({
       layers: newLayers,
       activeLayerId: newLayers.length > 0 ? newLayers[0].id : null,
       compositeCache: null,
       previewVersion: state.previewVersion + 1,
     }));
+    // 変更後の状態との差分を 1 件の履歴として記録する（set より前だと差分が空になる）
+    saveToHistory();
   },
 
   mergeLayersById: (sourceLayerId, targetLayerId) => {
@@ -1568,13 +1571,14 @@ export const useEditorStore = create<EditorState>()(
       engine.setLayerData(targetLayerId, targetLayer.order, layerPixelsToUint8(targetLayer.pixels));
     }
 
-    saveToHistory();
     set((state) => ({
       layers: newLayers,
       activeLayerId: state.activeLayerId === sourceLayerId ? targetLayerId : state.activeLayerId,
       compositeCache: null,
       previewVersion: state.previewVersion + 1,
     }));
+    // 変更後の状態との差分を 1 件の履歴として記録する（set より前だと差分が空になる）
+    saveToHistory();
   },
 
   mergeSimilarLayersAction: (options = {}) => {
@@ -1597,13 +1601,14 @@ export const useEditorStore = create<EditorState>()(
       engine.setLayerData(layer.id, layer.order, layerPixelsToUint8(layer.pixels));
     }
 
-    saveToHistory();
     set((state) => ({
       layers: newLayers,
       activeLayerId: newLayers.length > 0 ? newLayers[0].id : null,
       compositeCache: null,
       previewVersion: state.previewVersion + 1,
     }));
+    // 変更後の状態との差分を 1 件の履歴として記録する（set より前だと差分が空になる）
+    saveToHistory();
   },
 
   splitLayerByColorAction: (layerId, options = {}) => {
@@ -1627,12 +1632,13 @@ export const useEditorStore = create<EditorState>()(
       engine.setLayerData(layer.id, layer.order, layerPixelsToUint8(layer.pixels));
     }
 
-    saveToHistory();
     set((state) => ({
       layers: newLayers,
       compositeCache: null,
       previewVersion: state.previewVersion + 1,
     }));
+    // 変更後の状態との差分を 1 件の履歴として記録する（set より前だと差分が空になる）
+    saveToHistory();
   },
 
   splitLayerBySelectionAction: (layerId, selectedPixels) => {
@@ -1658,13 +1664,17 @@ export const useEditorStore = create<EditorState>()(
         engine.setLayerData(newLayerId, newLayer.order, layerPixelsToUint8(newLayer.pixels));
       }
 
-      saveToHistory();
       set((state) => ({
         layers: newLayers,
         activeLayerId: newLayerId,
         compositeCache: null,
         previewVersion: state.previewVersion + 1,
       }));
+      // 変更後の状態との差分を 1 件の履歴として記録する（set より前だと差分が空になる）
+      saveToHistory();
+    } else {
+      // 何も分割しなかった場合は、取ったスナップショットを次の操作に持ち越さない
+      clearSnapshot();
     }
 
     return newLayerId;
@@ -1690,8 +1700,9 @@ export const useEditorStore = create<EditorState>()(
       }
     }
 
-    saveToHistory();
     set((state) => ({ layers: newLayers, compositeCache: null, previewVersion: state.previewVersion + 1 }));
+    // 変更後の状態との差分を 1 件の履歴として記録する（set より前だと差分が空になる）
+    saveToHistory();
   },
 
   getImageData: () => {
