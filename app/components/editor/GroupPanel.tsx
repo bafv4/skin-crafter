@@ -52,7 +52,8 @@ import {
   DropdownMenuTrigger,
 } from '@components/ui/dropdown-menu';
 import { useEditorStore } from '../../stores/editorStore';
-import { rgbaToHex, type RGBA, type LayerGroup, type MaterialType } from '../../types/editor';
+import { sortFrontToBack } from '../../lib/layerComposite';
+import { rgbaToHex, type RGBA, type Layer, type LayerGroup, type MaterialType } from '../../types/editor';
 
 // Drag and drop context
 interface DragState {
@@ -852,6 +853,8 @@ const LayerItem = memo(function LayerItem({
       onDrop?.(e, layerId, dropPosition);
     }
     setDropPosition(null);
+    // 移動でドラッグ元の要素が作り直されると dragend が届かないので、ドロップ時にも解除する
+    draggedItem = null;
   };
 
   const handleDragLeave = () => {
@@ -1104,6 +1107,7 @@ const LayerGroupItem = memo(function LayerGroupItem({
     setDropTarget(false);
     setGroupDropPosition(null);
     setLayerDropPosition(null);
+    draggedItem = null;
   };
 
   const handleDragLeave = () => {
@@ -1313,15 +1317,9 @@ export function LayerPanel({ width }: { width?: number }) {
   const [mergeSourceLayerId, setMergeSourceLayerId] = useState<string | null>(null);
   const [deleteDialogState, setDeleteDialogState] = useState<{ layerId: string; layerName: string } | null>(null);
 
-  // Memoize sorted layers and groups
-  const sortedLayers = useMemo(
-    () => [...layers].sort((a, b) => a.order - b.order),
-    [layers]
-  );
-  const sortedGroups = useMemo(
-    () => [...layerGroups].sort((a, b) => a.order - b.order),
-    [layerGroups]
-  );
+  // 手前から奥の順（キャンバスの重なり順と同じ並び）
+  const sortedLayers = useMemo(() => sortFrontToBack(layers), [layers]);
+  const sortedGroups = useMemo(() => sortFrontToBack(layerGroups), [layerGroups]);
 
   // Memoize ungrouped layers
   const ungroupedLayers = useMemo(
@@ -1343,12 +1341,13 @@ export function LayerPanel({ width }: { width?: number }) {
       b: Math.floor(Math.random() * 256),
       a: 255,
     };
-    createLayer(name, randomColor);
-  }, [layers.length, createLayer]);
+    // 作成も履歴に残す（残さないと、元に戻した並び順の値が新しいレイヤーの値と重なることがある）
+    recordHistory(() => createLayer(name, randomColor));
+  }, [layers.length, createLayer, recordHistory]);
 
   const handleCreateGroup = useCallback(() => {
-    createLayerGroup(`Group ${layerGroups.length + 1}`);
-  }, [layerGroups.length, createLayerGroup]);
+    recordHistory(() => createLayerGroup(`Group ${layerGroups.length + 1}`));
+  }, [layerGroups.length, createLayerGroup, recordHistory]);
 
   const handleMergeSimilar = useCallback((options: { thresholdValue: number; applyNoise: boolean }) => {
     mergeSimilarLayersAction({ thresholdValue: options.thresholdValue, applyNoise: options.applyNoise });
@@ -1364,6 +1363,15 @@ export function LayerPanel({ width }: { width?: number }) {
     draggedItem = null;
   }, []);
 
+  // 同じグループ（またはグループなし）のレイヤーを、手前から順に order 0, 1, 2... として並べ直す
+  const applyLayerSequence = useCallback((sequence: Layer[], groupId: string | null) => {
+    sequence.forEach((l, i) => {
+      if (l.order !== i || l.groupId !== groupId) {
+        reorderLayer(l.id, i, groupId);
+      }
+    });
+  }, [reorderLayer]);
+
   const handleLayerDrop = useCallback((e: React.DragEvent, targetId: string, position: 'before' | 'after') => {
     if (!draggedItem || draggedItem.type !== 'layer') return;
 
@@ -1377,66 +1385,35 @@ export function LayerPanel({ width }: { width?: number }) {
     const sourceGroupId = draggedLayer.groupId;
     const targetGroupId = targetLayer.groupId;
 
-    // Calculate new order in the target group
-    const targetGroupLayers = layers
-      .filter((l) => l.groupId === targetGroupId && l.id !== draggedLayer.id)
-      .sort((a, b) => a.order - b.order);
+    // 移動先のグループでの新しい並び（手前から）
+    const current = sortedLayers.filter((l) => l.groupId === targetGroupId);
+    const next = current.filter((l) => l.id !== draggedLayer.id);
+    const targetIndex = next.findIndex((l) => l.id === targetLayer.id);
+    next.splice(position === 'before' ? targetIndex : targetIndex + 1, 0, draggedLayer);
 
-    let newOrder: number;
-    const targetIndex = targetGroupLayers.findIndex((l) => l.id === targetLayer.id);
-
-    if (position === 'before') {
-      if (targetIndex === 0) {
-        newOrder = targetGroupLayers[0].order - 1;
-      } else {
-        newOrder = (targetGroupLayers[targetIndex - 1].order + targetGroupLayers[targetIndex].order) / 2;
-      }
-    } else {
-      if (targetIndex === targetGroupLayers.length - 1) {
-        newOrder = targetGroupLayers[targetIndex].order + 1;
-      } else {
-        newOrder = (targetGroupLayers[targetIndex].order + targetGroupLayers[targetIndex + 1].order) / 2;
-      }
-    }
+    // 並びが変わらないなら何もしない（番号の振り直しだけの履歴を残さない）
+    if (sourceGroupId === targetGroupId && next.every((l, i) => l.id === current[i].id)) return;
 
     // 移動と番号の振り直しをまとめて 1 回の操作として履歴に記録する
     recordHistory(() => {
-      // Move the layer to the new position
-      reorderLayer(draggedLayer.id, newOrder, targetGroupId);
-
-      // Re-normalize orders in target group (including the moved layer)
-      const updatedTargetLayers = layers
-        .filter((l) => l.groupId === targetGroupId || l.id === draggedLayer.id)
-        .map((l) => (l.id === draggedLayer.id ? { ...l, order: newOrder, groupId: targetGroupId } : l))
-        .filter((l) => l.groupId === targetGroupId)
-        .sort((a, b) => a.order - b.order);
-
-      updatedTargetLayers.forEach((l, i) => {
-        if (l.order !== i) {
-          reorderLayer(l.id, i, targetGroupId);
-        }
-      });
-
-      // If moving between groups, re-normalize source group
+      applyLayerSequence(next, targetGroupId);
+      // グループ間の移動なら、移動元のグループも振り直す
       if (sourceGroupId !== targetGroupId) {
-        const sourceGroupLayers = layers
-          .filter((l) => l.groupId === sourceGroupId && l.id !== draggedLayer.id)
-          .sort((a, b) => a.order - b.order);
-
-        sourceGroupLayers.forEach((l, i) => {
-          if (l.order !== i) {
-            reorderLayer(l.id, i, sourceGroupId);
-          }
-        });
+        applyLayerSequence(
+          sortedLayers.filter((l) => l.groupId === sourceGroupId && l.id !== draggedLayer.id),
+          sourceGroupId
+        );
       }
     });
-  }, [layers, reorderLayer, recordHistory]);
+  }, [layers, sortedLayers, applyLayerSequence, recordHistory]);
 
   const handleLayerToGroupDrop = useCallback((e: React.DragEvent, groupId: string) => {
     if (!draggedItem || draggedItem.type !== 'layer') return;
-    const layerId = draggedItem.id;
-    recordHistory(() => moveLayerToGroup(layerId, groupId));
-  }, [moveLayerToGroup, recordHistory]);
+    const layer = layers.find((l) => l.id === draggedItem!.id);
+    // すでにそのグループにあるなら何もしない（末尾へ回さない）
+    if (!layer || layer.groupId === groupId) return;
+    recordHistory(() => moveLayerToGroup(layer.id, groupId));
+  }, [layers, moveLayerToGroup, recordHistory]);
 
   // Handle dropping a layer outside of a group (before/after group in the list)
   const handleLayerDropOutsideGroup = useCallback((e: React.DragEvent, position: 'before' | 'after', referenceGroupId: string) => {
@@ -1444,79 +1421,48 @@ export function LayerPanel({ width }: { width?: number }) {
 
     const draggedLayer = layers.find((l) => l.id === draggedItem!.id);
     if (!draggedLayer) return;
+    if (!layerGroups.some((g) => g.id === referenceGroupId)) return;
 
-    // Move layer out of any group (set groupId to null)
-    // Calculate order based on ungrouped layers
-    const ungroupedLayers = layers
-      .filter((l) => l.groupId === null && l.id !== draggedItem!.id)
-      .sort((a, b) => a.order - b.order);
+    // グループの外（グループなしのレイヤー）の先頭または末尾へ移す
+    const current = sortedLayers.filter((l) => l.groupId === null);
+    const others = current.filter((l) => l.id !== draggedLayer.id);
+    const next = position === 'before' ? [draggedLayer, ...others] : [...others, draggedLayer];
+    if (draggedLayer.groupId === null && next.every((l, i) => l.id === current[i].id)) return;
 
-    // Find the reference group's order to determine where to place the layer
-    const referenceGroup = layerGroups.find((g) => g.id === referenceGroupId);
-    if (!referenceGroup) return;
-
-    // For now, place at the beginning or end of ungrouped layers based on position
-    let newOrder: number;
-    if (position === 'before') {
-      // Place before all ungrouped layers (at the top)
-      newOrder = ungroupedLayers.length > 0 ? ungroupedLayers[0].order - 1 : 0;
-    } else {
-      // Place after all ungrouped layers (at the bottom)
-      newOrder = ungroupedLayers.length > 0 ? ungroupedLayers[ungroupedLayers.length - 1].order + 1 : 0;
-    }
-
-    recordHistory(() => {
-      // First move to null group, then reorder
-      reorderLayer(draggedLayer.id, newOrder, null);
-
-      // Re-normalize orders for ungrouped layers
-      const updatedUngroupedLayers = layers
-        .filter((l) => l.groupId === null || l.id === draggedLayer.id)
-        .map((l) => (l.id === draggedLayer.id ? { ...l, order: newOrder, groupId: null } : l))
-        .filter((l) => l.groupId === null)
-        .sort((a, b) => a.order - b.order);
-
-      updatedUngroupedLayers.forEach((l, i) => {
-        if (l.order !== i) {
-          reorderLayer(l.id, i, null);
-        }
-      });
-    });
-  }, [layers, layerGroups, reorderLayer, recordHistory]);
+    recordHistory(() => applyLayerSequence(next, null));
+  }, [layers, layerGroups, sortedLayers, applyLayerSequence, recordHistory]);
 
   const handleGroupReorderDrop = useCallback((e: React.DragEvent, targetGroupId: string, position: 'before' | 'after') => {
     if (!draggedItem || draggedItem.type !== 'group') return;
 
     const draggedGroup = layerGroups.find((g) => g.id === draggedItem!.id);
-    const targetGroup = layerGroups.find((g) => g.id === targetGroupId);
-    if (!draggedGroup || !targetGroup || draggedGroup.id === targetGroup.id) return;
+    if (!draggedGroup || draggedGroup.id === targetGroupId) return;
 
-    // Calculate new order
-    const targetOrder = targetGroup.order;
-    const newOrder = position === 'before' ? targetOrder - 0.5 : targetOrder + 0.5;
+    // 新しいグループの並び（手前から）
+    const next = sortedGroups.filter((g) => g.id !== draggedGroup.id);
+    const targetIndex = next.findIndex((g) => g.id === targetGroupId);
+    if (targetIndex === -1) return;
+    next.splice(position === 'before' ? targetIndex : targetIndex + 1, 0, draggedGroup);
+    if (next.every((g, i) => g.id === sortedGroups[i].id)) return;
 
     recordHistory(() => {
-      reorderLayerGroup(draggedGroup.id, newOrder);
-
-      // Re-normalize orders
-      const updatedGroups = layerGroups
-        .map((g) => (g.id === draggedGroup.id ? { ...g, order: newOrder } : g))
-        .sort((a, b) => a.order - b.order);
-
-      updatedGroups.forEach((g, i) => {
+      next.forEach((g, i) => {
         if (g.order !== i) {
           reorderLayerGroup(g.id, i);
         }
       });
     });
-  }, [layerGroups, reorderLayerGroup, recordHistory]);
+  }, [layerGroups, sortedGroups, reorderLayerGroup, recordHistory]);
 
   const handleDropOutsideGroup = useCallback((e: React.DragEvent) => {
-    if (!draggedItem || draggedItem.type !== 'layer') return;
-    const layer = layers.find((l) => l.id === draggedItem!.id);
-    if (layer && layer.groupId !== null) {
-      recordHistory(() => moveLayerToGroup(layer.id, null));
+    if (draggedItem && draggedItem.type === 'layer') {
+      const layer = layers.find((l) => l.id === draggedItem!.id);
+      if (layer && layer.groupId !== null) {
+        recordHistory(() => moveLayerToGroup(layer.id, null));
+      }
     }
+    // 移動でドラッグ元の要素が作り直されると dragend が届かないので、ドロップ時にも解除する
+    draggedItem = null;
   }, [layers, moveLayerToGroup, recordHistory]);
 
   // Shared dialog handlers

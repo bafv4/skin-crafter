@@ -1352,7 +1352,8 @@ export const useEditorStore = create<EditorState>()(
       const layer = state.layers.find((l) => l.id === layerId);
       if (!layer) return state;
 
-      const targetLayers = state.layers.filter((l) => l.groupId === groupId);
+      // 移すレイヤー自身は除く（すでに末尾にあるなら order は変わらない）
+      const targetLayers = state.layers.filter((l) => l.groupId === groupId && l.id !== layerId);
       const maxOrder = targetLayers.length > 0 ? Math.max(...targetLayers.map(l => l.order)) : -1;
       getPixelEngine().setLayerOrder(layerId, maxOrder + 1);
 

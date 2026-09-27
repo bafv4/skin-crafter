@@ -4,7 +4,9 @@ import {
   alphaBlendMut,
   computeLayerComposite,
   createEmptyComposite,
+  groupRanks,
   rgbaEqual,
+  sortFrontToBack,
 } from './layerComposite';
 import {
   type Layer,
@@ -455,6 +457,17 @@ describe('computeLayerComposite', () => {
       expect(computeLayerComposite([inFront, inBack], swapped)[0][0]).toEqual(BLUE);
     });
 
+    it('order が同じグループのレイヤーは入り混じらず、配列の後ろのグループがまとめて手前になる', () => {
+      const first = makeGroup({ id: 'first', order: 0 });
+      const second = makeGroup({ id: 'second', order: 0 });
+      // レイヤーの order だけで比べると first のレイヤー（order 0）が手前になる配置
+      const inFirst = makeLayer({ id: 'a', groupId: 'first', order: 0, pixels: pixelsWith([[0, 0, RED]]) });
+      const inSecond = makeLayer({ id: 'b', groupId: 'second', order: 1, pixels: pixelsWith([[0, 0, BLUE]]) });
+
+      expect(computeLayerComposite([inFirst, inSecond], [first, second])[0][0]).toEqual(BLUE);
+      expect(computeLayerComposite([inFirst, inSecond], [second, first])[0][0]).toEqual(RED);
+    });
+
     it('同じグループ内ではレイヤーの order で重ね順が決まる', () => {
       const group = makeGroup({ id: 'g', order: 0 });
       const front = makeLayer({ id: 'f', groupId: 'g', order: 0, pixels: pixelsWith([[0, 0, GREEN]]) });
@@ -686,5 +699,34 @@ describe('rgbaEqual', () => {
 
   it('アルファ 0 同士でも色成分が異なれば等しくない（厳密比較）', () => {
     expect(rgbaEqual(rgba(255, 0, 0, 0), rgba(0, 0, 0, 0))).toBe(false);
+  });
+});
+
+describe('sortFrontToBack', () => {
+  it('order の小さい順（手前から）に並べ、同じ order は配列の後ろのものを先にする', () => {
+    const items = [
+      { id: 'a', order: 1 },
+      { id: 'b', order: 0 },
+      { id: 'c', order: 1 },
+      { id: 'd', order: 0 },
+    ];
+    expect(sortFrontToBack(items).map((i) => i.id)).toEqual(['d', 'b', 'c', 'a']);
+  });
+
+  it('元の配列を変更しない', () => {
+    const items = [{ order: 2 }, { order: 1 }];
+    sortFrontToBack(items);
+    expect(items.map((i) => i.order)).toEqual([2, 1]);
+  });
+});
+
+describe('groupRanks', () => {
+  it('グループ ID → 重なりの順位（手前が 0）を返し、order が同じでも順位は重ならない', () => {
+    const ranks = groupRanks([
+      makeGroup({ id: 'g1', order: 5 }),
+      makeGroup({ id: 'g2', order: 2 }),
+      makeGroup({ id: 'g3', order: 5 }),
+    ]);
+    expect(Object.fromEntries(ranks)).toEqual({ g2: 0, g3: 1, g1: 2 });
   });
 });

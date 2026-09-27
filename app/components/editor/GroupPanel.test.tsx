@@ -244,3 +244,172 @@ describe('ドラッグ＆ドロップでのグループの並べ替え', () => {
     expect(arrangement()).toEqual(after);
   });
 });
+
+describe('並びが変わらないドロップ', () => {
+  it('レイヤーを自分のグループの中へドロップしても、並びも履歴も変わらない', () => {
+    useEditorStore.setState({
+      layerGroups: [makeGroup('G1', 0)],
+      layers: [makeLayer('A', 0, 'G1'), makeLayer('B', 1, 'G1'), makeLayer('C', 2, 'G1')],
+    });
+    render(<GroupPanel />);
+    const before = arrangement();
+
+    drag(layerCard('A'), groupDropArea('G1'), MIDDLE);
+
+    expect(arrangement()).toEqual(before);
+    expect(s().history).toHaveLength(0);
+  });
+
+  it('いまと同じ位置へのドロップは履歴を追加せず、やり直しも消えない', () => {
+    // 削除などで order に隙間がある状態
+    useEditorStore.setState({
+      layerGroups: [makeGroup('G1', 0)],
+      layers: [makeLayer('A', 0, 'G1'), makeLayer('C', 2, 'G1'), makeLayer('X', 0)],
+    });
+    render(<GroupPanel />);
+    drag(layerCard('A'), layerCard('C'), BOTTOM); // 1 件目: A を C の後ろへ
+    s().undo();
+    const before = arrangement();
+
+    drag(layerCard('A'), layerCard('C'), TOP); // A はすでに C の前にある
+
+    expect(arrangement()).toEqual(before);
+    expect(s().historyIndex).toBe(-1);
+    s().redo();
+    const order = s().layers.filter((l) => l.groupId === 'G1').sort((p, q) => p.order - q.order).map((l) => l.id);
+    expect(order).toEqual(['C', 'A']);
+  });
+
+  it('グループをいまと同じ位置へドロップしても履歴を追加しない', () => {
+    useEditorStore.setState({ layerGroups: [makeGroup('G1', 0), makeGroup('G2', 2)] });
+    render(<GroupPanel />);
+    const before = arrangement();
+
+    drag(groupHeader('G1'), groupDropArea('G2'), TOP);
+
+    expect(arrangement()).toEqual(before);
+    expect(s().history).toHaveLength(0);
+  });
+
+  it('グループの外にあるレイヤーをグループの外の同じ位置へドロップしても履歴を追加しない', () => {
+    useEditorStore.setState({
+      layerGroups: [makeGroup('G1', 0)],
+      layers: [makeLayer('X', 0), makeLayer('Y', 3)],
+    });
+    render(<GroupPanel />);
+    const before = arrangement();
+
+    drag(layerCard('X'), groupDropArea('G1'), TOP); // グループの外の先頭へ（X はすでに先頭）
+
+    expect(arrangement()).toEqual(before);
+    expect(s().history).toHaveLength(0);
+  });
+});
+
+describe('ドラッグ状態の後始末', () => {
+  it('グループをまたいで移したあと、外部からのドロップ（ファイルなど）でレイヤーが動かない', () => {
+    useEditorStore.setState({
+      layerGroups: [makeGroup('G1', 0)],
+      layers: [makeLayer('A', 0, 'G1'), makeLayer('X', 0), makeLayer('Y', 1)],
+    });
+    render(<GroupPanel />);
+    drag(layerCard('A'), layerCard('Y'), BOTTOM); // A をグループの外へ（カードが作り直され dragend が届かない）
+    const before = arrangement();
+    const historyLength = s().history.length;
+
+    // dragstart のない外部からのドロップ
+    fireEvent.dragOver(layerCard('X'), { clientY: TOP });
+    fireEvent.drop(layerCard('X'), { clientY: TOP });
+    fireEvent.dragOver(groupDropArea('G1'), { clientY: MIDDLE });
+    fireEvent.drop(groupDropArea('G1'), { clientY: MIDDLE });
+
+    expect(arrangement()).toEqual(before);
+    expect(s().history).toHaveLength(historyLength);
+  });
+});
+
+describe('レイヤー・グループの作成と履歴', () => {
+  it('パネルのボタンでのレイヤー・グループの作成は、それぞれ 1 件の履歴として取り消せる', () => {
+    const { container } = render(<GroupPanel />);
+
+    fireEvent.click(container.querySelector('button:has(svg.lucide-plus)')!);
+    fireEvent.click(container.querySelector('button:has(svg.lucide-folder-plus)')!);
+    expect(s().layers).toHaveLength(1);
+    expect(s().layerGroups).toHaveLength(1);
+    expect(s().history).toHaveLength(2);
+
+    s().undo();
+    expect(s().layerGroups).toHaveLength(0);
+    s().undo();
+    expect(s().layers).toHaveLength(0);
+    expect(engine.deleteLayer).toHaveBeenCalled();
+  });
+
+  it('並べ替え → レイヤー作成 → 取り消しで、重なり順の値が重複しない', () => {
+    useEditorStore.setState({
+      layerGroups: [makeGroup('G', 0)],
+      layers: [makeLayer('A', 0), makeLayer('B', 1), makeLayer('C', 2)],
+    });
+    const { container } = render(<GroupPanel />);
+    drag(layerCard('B'), groupDropArea('G'), MIDDLE); // B をグループへ（A:0, C:2 が残る）
+    drag(layerCard('A'), layerCard('C'), BOTTOM); // A を C の後ろへ（C:0, A:1）
+    fireEvent.click(container.querySelector('button:has(svg.lucide-plus)')!); // 新しいレイヤー
+
+    s().undo(); // 作成を取り消す
+    s().undo(); // 並べ替えを取り消す
+
+    const ungrouped = s().layers.filter((l) => l.groupId === null).map((l) => l.order);
+    expect(new Set(ungrouped).size).toBe(ungrouped.length);
+  });
+
+  it('グループの並べ替え → グループ作成 → 取り消しで、グループの順番が重複しない', () => {
+    useEditorStore.setState({ layerGroups: [makeGroup('G1', 0), makeGroup('G3', 2)] });
+    const { container } = render(<GroupPanel />);
+    drag(groupHeader('G1'), groupDropArea('G3'), BOTTOM); // G3:0, G1:1
+    fireEvent.click(container.querySelector('button:has(svg.lucide-folder-plus)')!);
+
+    s().undo();
+    s().undo();
+
+    const orders = s().layerGroups.map((g) => g.order);
+    expect(new Set(orders).size).toBe(orders.length);
+  });
+});
+
+describe('重なり順の値が同じときの表示と合成', () => {
+  const RED = { r: 255, g: 0, b: 0, a: 255 };
+  const BLUE = { r: 0, g: 0, b: 255, a: 255 };
+
+  // パネルで上に表示されているレイヤーの色が、合成結果（キャンバス）で手前に見える
+  function paint(layer: Layer, color: typeof RED): Layer {
+    layer.pixels[0][0] = { ...color };
+    return layer;
+  }
+
+  function panelOrder(): string[] {
+    return [...document.querySelectorAll('div.rounded-lg.border.p-2[draggable] span.truncate')].map((e) => e.textContent!);
+  }
+
+  it('グループの外で order が同じレイヤーは、パネルで上にある方がキャンバスでも手前になる', () => {
+    useEditorStore.setState({
+      layers: [paint(makeLayer('X', 0), RED), paint(makeLayer('A', 0), BLUE)],
+    });
+    render(<GroupPanel />);
+
+    const top = panelOrder()[0];
+    const front = s().getComposite()[0][0];
+    expect(front).toEqual(top === 'レイヤーX' ? RED : BLUE);
+  });
+
+  it('order が同じグループは、パネルで上にあるグループのレイヤーがキャンバスでも手前になる', () => {
+    useEditorStore.setState({
+      layerGroups: [makeGroup('G1', 0), makeGroup('G2', 0)],
+      layers: [paint(makeLayer('X', 1, 'G1'), RED), paint(makeLayer('Z', 0, 'G2'), BLUE)],
+    });
+    render(<GroupPanel />);
+
+    const top = panelOrder()[0];
+    const front = s().getComposite()[0][0];
+    expect(front).toEqual(top === 'レイヤーX' ? RED : BLUE);
+  });
+});

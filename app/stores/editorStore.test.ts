@@ -1029,6 +1029,17 @@ describe('レイヤーグループ', () => {
       expect(layerOf(c)).toMatchObject({ groupId: g, order: 6 });
     });
 
+    it('すでにそのグループの最背面にあるレイヤーを同じグループへ移しても order は変わらない', () => {
+      const g = store().createLayerGroup('G');
+      const a = store().createLayer('A', RED);
+      const b = store().createLayer('B', RED);
+      store().reorderLayer(a, 0, g);
+      store().reorderLayer(b, 1, g);
+
+      store().moveLayerToGroup(b, g);
+      expect(layerOf(b)).toMatchObject({ groupId: g, order: 1 });
+    });
+
     it('空のグループへ移動すると order は 0 になる', () => {
       const g = store().createLayerGroup('G');
       store().createLayer('A', RED);

@@ -11,7 +11,7 @@ import {
   createEmptyLayerPixels,
   cloneLayerPixels,
 } from '../types/editor';
-import { alphaBlendMut, compareLayersBackToFront } from './layerComposite';
+import { alphaBlendMut, compareLayersBackToFront, groupRanks, sortFrontToBack } from './layerComposite';
 
 // Color similarity threshold presets (0-441, where 441 is max distance in RGB space)
 export const COLOR_THRESHOLD_PRESETS = {
@@ -495,7 +495,7 @@ export function mergeSimilarLayers(
     ? calculateNoiseFromThreshold(threshold)
     : null;
 
-  const groupOrderMap = new Map(layerGroups.map((g) => [g.id, g.order]));
+  const groupOrderMap = groupRanks(layerGroups);
   // 元の配列での位置（描画順が同じ場合の前後判定に使う）
   const indexOf = new Map(layers.map((l, i) => [l.id, i]));
   const newLayers: Layer[] = [];
@@ -568,7 +568,7 @@ export function mergeLayers(
 
     if (layer.id === targetLayerId) {
       // 重なるピクセルは画面の合成と同じく手前のレイヤーが上になるように統合する
-      const groupOrderMap = new Map(layerGroups.map((g) => [g.id, g.order]));
+      const groupOrderMap = groupRanks(layerGroups);
       newLayers.push(
         mergeLayerInto(layer, sourceLayer, layers.indexOf(targetLayer), layers.indexOf(sourceLayer), groupOrderMap)
       );
@@ -584,11 +584,8 @@ export function mergeLayers(
 // 同じグループ（またはグループなし）のレイヤーの、実際の描画順での順位（手前が 0）。
 // order が同じレイヤーは、合成と同じく配列の後ろにある方が手前
 function drawRanksInBucket(layers: Layer[], groupId: string | null): Map<string, number> {
-  const bucket = layers
-    .map((l, index) => ({ l, index }))
-    .filter(({ l }) => l.groupId === groupId);
-  bucket.sort((a, b) => a.l.order - b.l.order || b.index - a.index);
-  return new Map(bucket.map(({ l }, rank) => [l.id, rank]));
+  const bucket = sortFrontToBack(layers.filter((l) => l.groupId === groupId));
+  return new Map(bucket.map((l, rank) => [l.id, rank]));
 }
 
 /**

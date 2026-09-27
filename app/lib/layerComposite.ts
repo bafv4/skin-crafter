@@ -59,7 +59,22 @@ function getHiddenLayerIds(layers: Layer[], layerGroups: LayerGroup[]): Set<stri
   return hiddenLayerIds;
 }
 
-// 描画順の比較（奥のレイヤーが先）。グループの order → レイヤーの order の順に比べ、
+// 手前から奥の順に並べる（レイヤーパネルの表示順）。order が小さいほど手前で、
+// 同じ order のときは合成と同じく配列の後ろにある方を手前にする
+export function sortFrontToBack<T extends { order: number }>(items: readonly T[]): T[] {
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => a.item.order - b.item.order || b.index - a.index)
+    .map(({ item }) => item);
+}
+
+// グループ ID → 重なりの順位（手前が 0）。order が同じグループどうしも順位は重ならないので、
+// 合成で 2 つのグループのレイヤーが入り混じらず、パネルの表示順と一致する
+export function groupRanks(layerGroups: readonly LayerGroup[]): Map<string, number> {
+  return new Map(sortFrontToBack(layerGroups).map((group, rank) => [group.id, rank]));
+}
+
+// 描画順の比較（奥のレイヤーが先）。グループの順位（groupRanks）→ レイヤーの order の順に比べ、
 // どちらも大きい方が奥。グループに入っていないレイヤーはグループ内のレイヤーより奥になる。
 // 同じ値のときは 0 を返す（安定ソートで配列の後ろの要素が手前になる）
 export function compareLayersBackToFront(a: Layer, b: Layer, groupOrderMap: Map<string, number>): number {
@@ -94,11 +109,7 @@ export function computeLayerComposite(
 
   const hiddenLayerIds = getHiddenLayerIds(layers, layerGroups);
 
-  // Build group order map for fast lookup
-  const groupOrderMap = new Map<string, number>();
-  for (const group of layerGroups) {
-    groupOrderMap.set(group.id, group.order);
-  }
+  const groupOrderMap = groupRanks(layerGroups);
 
   // Filter and sort layers - only visible ones
   const visibleLayers: Layer[] = [];
