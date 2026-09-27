@@ -106,6 +106,29 @@ function useSkinTexture() {
 // - MC Front = facing viewer -> Three.js +Z
 // - MC Back = facing away -> Three.js -Z
 //
+// UV の内側オフセット（テクセル単位）
+const UV_INSET = 0.01;
+
+// レイヤー2（外側）の拡大率
+const LAYER2_SCALE = 1.1;
+
+// 隣接パーツのレイヤー2同士が同一平面で重なると Z ファイティングで線やちらつきが出るため、
+// パーツごとにごくわずかに異なる量だけ外側へ広げる（1px = 0.125 なので見た目には影響しない）
+const LAYER2_EXTRA: Record<BodyPartKey, number> = {
+  head: 0,
+  rightLeg: 0,
+  leftLeg: 0.004,
+  body: 0.008,
+  rightArm: 0.012,
+  leftArm: 0.012,
+};
+
+// 胴体の下辺には両足の境目（x=0）に頂点がないため（T字接合）、辺に沿って微小な隙間が生じ
+// 内部の面が点線状に見えることがある。足を胴体側へわずかに食い込ませて隙間を塞ぐ
+const LEG_OVERLAP = 0.01;
+const LEG_SIZE: [number, number, number] = [0.5, 1.5 + LEG_OVERLAP, 0.5];
+const LEG_Y = -1.125 + LEG_OVERLAP / 2;
+
 function createSkinGeometry(
   width: number,
   height: number,
@@ -125,11 +148,13 @@ function createSkinGeometry(
   // Helper to convert pixel coords to UV coords
   // Returns 4 vertices: bottom-left, bottom-right, top-right, top-left (CCW from bottom-left)
   // ClampToEdgeWrapping prevents texture bleeding, so we use exact pixel boundaries
+  // UV をテクセル境界ちょうどにすると、面の端で浮動小数点誤差により隣のテクセル
+  // （透明や別パーツの色）が拾われ、細い線が出る。わずかに内側へ寄せて防ぐ
   const toFaceUVs = (x: number, y: number, w: number, h: number): [number, number][] => {
-    const u1 = x / SKIN_WIDTH;
-    const u2 = (x + w) / SKIN_WIDTH;
-    const v1 = 1 - (y + h) / SKIN_HEIGHT; // bottom in UV
-    const v2 = 1 - y / SKIN_HEIGHT;       // top in UV
+    const u1 = (x + UV_INSET) / SKIN_WIDTH;
+    const u2 = (x + w - UV_INSET) / SKIN_WIDTH;
+    const v1 = 1 - (y + h - UV_INSET) / SKIN_HEIGHT; // bottom in UV
+    const v2 = 1 - (y + UV_INSET) / SKIN_HEIGHT;     // top in UV
     return [
       [u1, v1], // 0: bottom-left
       [u2, v1], // 1: bottom-right
@@ -182,6 +207,7 @@ function BodyPart({
   uvMap,
   texture,
   layer2UvMap,
+  layer2Extra = 0,
   showInner = true,
   showLayer2,
 }: {
@@ -197,6 +223,7 @@ function BodyPart({
   };
   texture: THREE.Texture;
   layer2UvMap?: typeof uvMap;
+  layer2Extra?: number;
   showInner?: boolean;
   showLayer2?: boolean;
 }) {
@@ -207,14 +234,13 @@ function BodyPart({
 
   const layer2Geometry = useMemo(() => {
     if (!layer2UvMap) return null;
-    const scale = 1.1;
     return createSkinGeometry(
-      size[0] * scale,
-      size[1] * scale,
-      size[2] * scale,
+      size[0] * LAYER2_SCALE + layer2Extra,
+      size[1] * LAYER2_SCALE + layer2Extra,
+      size[2] * LAYER2_SCALE + layer2Extra,
       layer2UvMap
     );
-  }, [size, layer2UvMap]);
+  }, [size, layer2UvMap, layer2Extra]);
 
   // GPU memory: dispose old geometries when deps change or component unmounts
   useEffect(() => {
@@ -266,6 +292,7 @@ function MinecraftCharacter({ modelType, autoRotate, partVisibility }: {
   }, [partVisibility, showLayer2]);
 
   const partProps = (key: BodyPartKey) => ({
+    layer2Extra: LAYER2_EXTRA[key],
     showInner: partVisibility[key].inner,
     showLayer2: showLayer2 && partVisibility[key].outer,
   });
@@ -391,8 +418,8 @@ function MinecraftCharacter({ modelType, autoRotate, partVisibility }: {
 
       {/* Right Leg */}
       <BodyPart
-        position={[-0.25, -1.125, 0]}
-        size={[0.5, 1.5, 0.5]}
+        position={[-0.25, LEG_Y, 0]}
+        size={LEG_SIZE}
         uvMap={{
           front: [4, 20, 4, 12],
           back: [12, 20, 4, 12],
@@ -415,8 +442,8 @@ function MinecraftCharacter({ modelType, autoRotate, partVisibility }: {
 
       {/* Left Leg */}
       <BodyPart
-        position={[0.25, -1.125, 0]}
-        size={[0.5, 1.5, 0.5]}
+        position={[0.25, LEG_Y, 0]}
+        size={LEG_SIZE}
         uvMap={{
           front: [20, 52, 4, 12],
           back: [28, 52, 4, 12],
