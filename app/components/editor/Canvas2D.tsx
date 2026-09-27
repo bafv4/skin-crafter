@@ -372,11 +372,20 @@ export function Canvas2D() {
   }, [isPanning, activeTool, rectStart, rectEnd, setPixelRect, isDrawing, commitDrawing, getDrawColor]);
 
   // 表示領域の大きさが変わったら（画面の回転・パネル幅の変更など）収まる倍率にする
-  const fitToContainer = useCallback(() => {
+  const fitToContainer = useCallback((fallback?: number) => {
     const container = containerRef.current;
-    // 非表示のタブ内では大きさが 0 になるので何もしない
-    if (!container || container.clientWidth === 0 || container.clientHeight === 0) return;
-    setScale(fitScale(container.clientWidth, container.clientHeight));
+    // 非表示のタブ内では大きさが 0 になるので、fallback がなければ何もしない
+    if (container && container.clientWidth > 0 && container.clientHeight > 0) {
+      setScale(fitScale(container.clientWidth, container.clientHeight));
+    } else if (fallback !== undefined) {
+      setScale(fallback);
+    }
+  }, []);
+
+  // 拡大・縮小（以降は表示領域の大きさに合わせない）
+  const zoomBy = useCallback((delta: number) => {
+    userZoomedRef.current = true;
+    setScale((prev) => Math.max(MIN_SCALE, Math.min(MAX_SCALE, prev + delta)));
   }, []);
 
   useEffect(() => {
@@ -392,27 +401,16 @@ export function Canvas2D() {
   // Handle wheel zoom
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
-    userZoomedRef.current = true;
-    setScale((prev) => {
-      const delta = e.deltaY > 0 ? -1 : 1;
-      return Math.max(MIN_SCALE, Math.min(MAX_SCALE, prev + delta));
-    });
-  }, []);
+    zoomBy(e.deltaY > 0 ? -1 : 1);
+  }, [zoomBy]);
 
   // Zoom handlers
-  const handleZoomIn = () => {
-    userZoomedRef.current = true;
-    setScale((s) => Math.min(s + 2, MAX_SCALE));
-  };
-  const handleZoomOut = () => {
-    userZoomedRef.current = true;
-    setScale((s) => Math.max(s - 2, MIN_SCALE));
-  };
+  const handleZoomIn = () => zoomBy(2);
+  const handleZoomOut = () => zoomBy(-2);
   // 表示をリセット: 表示領域に収まる倍率と中央の位置に戻し、以降も大きさに合わせる
   const handleReset = () => {
     userZoomedRef.current = false;
-    setScale(DEFAULT_SCALE);
-    fitToContainer();
+    fitToContainer(DEFAULT_SCALE);
     setPanOffset({ x: 0, y: 0 });
   };
 

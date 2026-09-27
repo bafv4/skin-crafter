@@ -44,7 +44,7 @@ describe('PosePicker', () => {
     expect(screen.getByRole('slider', { name: '右腕の前後（＋で前）' }).getAttribute('aria-valuenow')).toBe('30');
   });
 
-  it('スライダーでパーツごとの角度を変えられ、「標準に戻す」で 0 に戻る', () => {
+  it('スライダーでパーツごとの角度を変えられ、「標準」で 0 に戻る', () => {
     const onChange = vi.fn();
     render(<Harness onChange={onChange} />);
     const slider = screen.getByRole('slider', { name: '左足の横（＋で外）' });
@@ -55,7 +55,7 @@ describe('PosePicker', () => {
     expect(onChange).toHaveBeenLastCalledWith({ ...DEFAULT_POSE, leftLeg: { forward: 0, side: 10 } });
     expect(presets().queryByRole('button', { pressed: true })).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: '標準に戻す' }));
+    fireEvent.click(presets().getByRole('button', { name: '標準' }));
     expect(onChange).toHaveBeenLastCalledWith(DEFAULT_POSE);
     expect(slider.getAttribute('aria-valuenow')).toBe('0');
   });

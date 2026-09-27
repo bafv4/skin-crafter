@@ -248,8 +248,9 @@ function applyChangedFields<T extends object>(current: T, from: T, to: T, skip: 
 }
 
 // 存在しないグループに属するレイヤーをグループなしにする。
-// グループの作成・削除は履歴に残らないため、元に戻す・やり直しで削除済みのグループに属する
-// レイヤーが戻ることがある（そのままだとレイヤー一覧に表示されず操作できない）
+// パネルからのグループの作成・削除は履歴に残るが、履歴を通さずにグループを消す経路（deleteLayerGroup の
+// 直接呼び出しなど）もあるため、元に戻す・やり直しで削除済みのグループに属するレイヤーが戻ることがある
+// （そのままだとレイヤー一覧に表示されず操作できない）
 function withoutMissingGroups(layers: Layer[], layerGroups: LayerGroup[]): Layer[] {
   const groupIds = new Set(layerGroups.map((g) => g.id));
   return layers.map((l) => (l.groupId && !groupIds.has(l.groupId) ? { ...l, groupId: null } : l));
@@ -281,6 +282,11 @@ function takeSnapshot(layers: Layer[], layerGroups: LayerGroup[], activeLayerId:
   snapshotActiveLayerId = activeLayerId;
   snapshotLayers = cloneLayers(layers);
   snapshotLayerGroups = cloneLayerGroups(layerGroups);
+}
+
+// まだスナップショットがなければ取る（一連の変更の最初だけ撮り、確定時に 1 件の履歴にする）
+function ensureSnapshot(layers: Layer[], layerGroups: LayerGroup[], activeLayerId: string | null) {
+  if (!snapshotLayers) takeSnapshot(layers, layerGroups, activeLayerId);
 }
 
 // Calculate diff between snapshot and current state
@@ -921,9 +927,7 @@ export const useEditorStore = create<EditorState>()(
     }
 
     // Take snapshot if this is the first change in a drawing session
-    if (!snapshotLayers) {
-      takeSnapshot(updatedState.layers, layerGroups, updatedState.activeLayerId);
-    }
+    ensureSnapshot(updatedState.layers, layerGroups, updatedState.activeLayerId);
 
     // Directly mutate the pixel array for performance
     // Create new layer reference only (shallow copy) to trigger React updates
@@ -1086,9 +1090,7 @@ export const useEditorStore = create<EditorState>()(
 
     // 一連の色変更（ドラッグ中など）の最初だけスナップショットを取り、
     // 操作完了時に呼び出し側が saveToHistory() で 1 件の履歴として確定する
-    if (!snapshotLayers) {
-      takeSnapshot(layers, layerGroups, get().activeLayerId);
-    }
+    ensureSnapshot(layers, layerGroups, get().activeLayerId);
 
     const layer = layers[layerIndex];
     const newLayerPixels = cloneLayerPixels(layer.pixels);
@@ -1408,10 +1410,8 @@ export const useEditorStore = create<EditorState>()(
   },
 
   recordHistory: (apply) => {
-    if (!snapshotLayers) {
-      const { layers, layerGroups, activeLayerId } = get();
-      takeSnapshot(layers, layerGroups, activeLayerId);
-    }
+    const { layers, layerGroups, activeLayerId } = get();
+    ensureSnapshot(layers, layerGroups, activeLayerId);
     apply();
     get().saveToHistory();
   },

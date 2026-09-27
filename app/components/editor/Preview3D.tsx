@@ -14,7 +14,7 @@ import { Preview3DCanvas, DEFAULT_PART_VISIBILITY, BODY_PART_KEYS, type Capture3
 import { downloadBlob } from '@lib/skinRenderer';
 import { PartVisibilityPicker } from './PartVisibilityPicker';
 import { PosePicker } from './PosePicker';
-import { DEFAULT_POSE, isDefaultPose, type Pose } from '../../lib/pose';
+import { DEFAULT_POSE, isSamePose, type Pose } from '../../lib/pose';
 import { ViewHint, type HintItem } from './ViewHint';
 
 // OrbitControls の設定（Preview3D.client.tsx）に対応
@@ -141,7 +141,7 @@ export function Preview3D() {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <PopoverTrigger asChild>
-                    <Button variant={isDefaultPose(pose) ? 'outline' : 'default'} size="sm">
+                    <Button variant={isSamePose(pose, DEFAULT_POSE) ? 'outline' : 'default'} size="sm">
                       <Footprints className="mr-1 h-3 w-3" />
                       ポーズ
                     </Button>

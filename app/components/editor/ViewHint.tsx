@@ -1,5 +1,6 @@
 import { memo, useEffect, useState } from 'react';
 import { CircleHelp, X } from 'lucide-react';
+import { SMALL_SCREEN_QUERY } from '@lib/layout';
 
 export interface HintItem {
   keys: string[];
@@ -7,8 +8,6 @@ export interface HintItem {
 }
 
 // 小さい画面（スマホ）では、表示領域を隠さないよう最初は折りたたんでおく
-const SMALL_SCREEN_QUERY = '(max-width: 767px), (max-height: 499px)';
-
 function isSmallScreen(): boolean {
   return typeof window.matchMedia === 'function' && window.matchMedia(SMALL_SCREEN_QUERY).matches;
 }

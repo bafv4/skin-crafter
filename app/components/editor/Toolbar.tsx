@@ -26,6 +26,9 @@ export const TOOLS: { type: ToolType; icon: React.ReactNode; label: string; shor
   { type: 'eyedropper', icon: <Pipette className="h-5 w-5" />, label: 'スポイト', shortcut: 'I' },
 ];
 
+// ツールバーのボタンの大きさ（狭い画面では小さくする）
+const TOOL_BUTTON_CLASS = 'h-9 w-9 shrink-0 sm:h-10 sm:w-10';
+
 const TOOL_SHORTCUTS: Record<string, ToolType | ((shift: boolean) => ToolType)> = {
   p: 'pencil',
   e: (shift) => (shift ? 'rectangleEraser' : 'eraser'),
@@ -113,7 +116,7 @@ export function Toolbar() {
               <Button
                 variant={activeTool === tool.type ? 'default' : 'ghost'}
                 size="icon"
-                className="h-9 w-9 shrink-0 sm:h-10 sm:w-10"
+                className={TOOL_BUTTON_CLASS}
                 onClick={() => setActiveTool(tool.type)}
               >
                 {tool.icon}
@@ -133,7 +136,7 @@ export function Toolbar() {
             <Button
               variant={preservePixels ? 'default' : 'ghost'}
               size="icon"
-              className="h-9 w-9 shrink-0 sm:h-10 sm:w-10"
+              className={TOOL_BUTTON_CLASS}
               onClick={togglePreservePixels}
             >
               {preservePixels ? <Shield className="h-5 w-5" /> : <ShieldOff className="h-5 w-5" />}
@@ -151,7 +154,7 @@ export function Toolbar() {
               <TooltipTrigger asChild>
                 <PopoverTrigger asChild>
                   <button
-                    className="h-9 w-9 shrink-0 sm:h-10 sm:w-10 rounded-md border-2 border-border hover:border-muted-foreground transition-colors flex items-center justify-center"
+                    className={`${TOOL_BUTTON_CLASS} rounded-md border-2 border-border hover:border-muted-foreground transition-colors flex items-center justify-center`}
                     style={{ backgroundColor: rgbaToHex(drawingColor) }}
                   >
                     <Palette className="h-4 w-4 drop-shadow-[0_0_2px_rgba(255,255,255,0.8)]" style={{ color: drawingColor.r + drawingColor.g + drawingColor.b > 380 ? '#000' : '#fff' }} />
@@ -177,7 +180,7 @@ export function Toolbar() {
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-9 w-9 shrink-0 sm:h-10 sm:w-10"
+                className={TOOL_BUTTON_CLASS}
                 onClick={() => setGenerateDialogOpen(true)}
               >
                 <Sparkles className="h-5 w-5" />
@@ -196,7 +199,7 @@ export function Toolbar() {
             <Button
               variant="ghost"
               size="icon"
-              className="h-9 w-9 shrink-0 sm:h-10 sm:w-10"
+              className={TOOL_BUTTON_CLASS}
               onClick={undo}
               disabled={!canUndo}
             >
@@ -213,7 +216,7 @@ export function Toolbar() {
             <Button
               variant="ghost"
               size="icon"
-              className="h-9 w-9 shrink-0 sm:h-10 sm:w-10"
+              className={TOOL_BUTTON_CLASS}
               onClick={redo}
               disabled={!canRedo}
             >

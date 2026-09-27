@@ -63,6 +63,17 @@ interface DragState {
 
 let draggedItem: DragState | null = null;
 
+// ドラッグの終了。ドロップでドラッグ元の要素が作り直される（グループ間の移動など）と、元の要素に
+// dragend が届かず状態が残るので、ドロップを受けた側でも呼ぶ
+function endDrag() {
+  draggedItem = null;
+}
+
+// 2 つの並びが同じ順か（id で比べる）
+function sameOrder(a: readonly { id: string }[], b: readonly { id: string }[]): boolean {
+  return a.length === b.length && a.every((item, i) => item.id === b[i].id);
+}
+
 // Material options for noise generation
 const MATERIAL_OPTIONS: { value: MaterialType; label: string; description: string }[] = [
   { value: 'other', label: 'その他', description: '標準的なノイズパターン' },
@@ -239,126 +250,6 @@ function MergeDialog({
           <Button onClick={handleMerge} disabled={!targetLayerId}>
             統合
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// Noise settings dialog
-function NoiseDialog({
-  open,
-  onOpenChange,
-  layerId,
-  layerName,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  layerId: string;
-  layerName: string;
-}) {
-  const { layers, applyNoise } = useEditorStore();
-  const layer = layers.find((l) => l.id === layerId);
-
-  // Sliders now range from -100 to +100 (0 = no effect)
-  const [brightness, setBrightness] = useState(layer?.noiseSettings.brightness ?? 0);
-  const [hue, setHue] = useState(layer?.noiseSettings.hue ?? 0);
-  const [material, setMaterial] = useState<MaterialType>('other');
-
-  const handleApply = () => {
-    // Convert signed value to absolute + direction for the store
-    const brightnessDir = brightness >= 0 ? 'positive' : 'negative';
-    const hueDir = hue >= 0 ? 'positive' : 'negative';
-    applyNoise(layerId, Math.abs(brightness), Math.abs(hue), brightnessDir, hueDir, material);
-    onOpenChange(false);
-  };
-
-  const handleRegenerate = () => {
-    // Re-apply noise with same settings to generate new random pattern
-    const brightnessDir = brightness >= 0 ? 'positive' : 'negative';
-    const hueDir = hue >= 0 ? 'positive' : 'negative';
-    applyNoise(layerId, Math.abs(brightness), Math.abs(hue), brightnessDir, hueDir, material);
-  };
-
-  const selectedMaterial = MATERIAL_OPTIONS.find((m) => m.value === material);
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[450px]">
-        <DialogHeader>
-          <DialogTitle>ノイズを適用 - {layerName}</DialogTitle>
-        </DialogHeader>
-        <div className="flex flex-col gap-6 py-4">
-          <div className="flex flex-col gap-2">
-            <Label>マテリアル</Label>
-            <Select value={material} onValueChange={(v) => setMaterial(v as MaterialType)}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {MATERIAL_OPTIONS.map((opt) => (
-                  <SelectItem key={opt.value} value={opt.value}>
-                    <div className="flex flex-col">
-                      <span>{opt.label}</span>
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {selectedMaterial && (
-              <p className="text-xs text-muted-foreground">{selectedMaterial.description}</p>
-            )}
-          </div>
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center justify-between">
-              <Label>明るさ</Label>
-              <span className="text-sm text-muted-foreground">{formatPercent(brightness)}</span>
-            </div>
-            <Slider
-              value={[brightness]}
-              onValueChange={([v]) => setBrightness(v)}
-              min={-100}
-              max={100}
-              step={1}
-            />
-            <div className="flex justify-between text-xs text-muted-foreground">
-              <span>暗い</span>
-              <span>明るい</span>
-            </div>
-          </div>
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center justify-between">
-              <Label>色相シフト</Label>
-              <span className="text-sm text-muted-foreground">{formatPercent(hue)}</span>
-            </div>
-            <Slider
-              value={[hue]}
-              onValueChange={([v]) => setHue(v)}
-              min={-100}
-              max={100}
-              step={1}
-            />
-            <div className="flex justify-between text-xs text-muted-foreground">
-              <span>寒色</span>
-              <span>暖色</span>
-            </div>
-          </div>
-        </div>
-        <DialogFooter className="gap-2 sm:gap-0">
-          <Button
-            variant="outline"
-            onClick={handleRegenerate}
-            disabled={brightness === 0 && hue === 0}
-            className="gap-2"
-          >
-            <RefreshCw className="h-4 w-4" />
-            再生成
-          </Button>
-          <div className="flex-1" />
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            キャンセル
-          </Button>
-          <Button onClick={handleApply}>適用</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -864,8 +755,7 @@ const LayerItem = memo(function LayerItem({
       onDrop?.(e, layerId, dropPosition);
     }
     setDropPosition(null);
-    // 移動でドラッグ元の要素が作り直されると dragend が届かないので、ドロップ時にも解除する
-    draggedItem = null;
+    endDrag();
   };
 
   const handleDragLeave = () => {
@@ -1119,7 +1009,7 @@ const LayerGroupItem = memo(function LayerGroupItem({
     setDropTarget(false);
     setGroupDropPosition(null);
     setLayerDropPosition(null);
-    draggedItem = null;
+    endDrag();
   };
 
   const handleDragLeave = () => {
@@ -1372,9 +1262,7 @@ export function LayerPanel({ width, fill = false }: { width?: number; fill?: boo
     e.dataTransfer.effectAllowed = 'move';
   }, []);
 
-  const handleDragEnd = useCallback(() => {
-    draggedItem = null;
-  }, []);
+  const handleDragEnd = useCallback(endDrag, []);
 
   // 同じグループ（またはグループなし）のレイヤーを、手前から順に order 0, 1, 2... として並べ直す
   const applyLayerSequence = useCallback((sequence: Layer[], groupId: string | null) => {
@@ -1405,7 +1293,7 @@ export function LayerPanel({ width, fill = false }: { width?: number; fill?: boo
     next.splice(position === 'before' ? targetIndex : targetIndex + 1, 0, draggedLayer);
 
     // 並びが変わらないなら何もしない（番号の振り直しだけの履歴を残さない）
-    if (sourceGroupId === targetGroupId && next.every((l, i) => l.id === current[i].id)) return;
+    if (sourceGroupId === targetGroupId && sameOrder(next, current)) return;
 
     // 移動と番号の振り直しをまとめて 1 回の操作として履歴に記録する
     recordHistory(() => {
@@ -1440,7 +1328,7 @@ export function LayerPanel({ width, fill = false }: { width?: number; fill?: boo
     const current = sortedLayers.filter((l) => l.groupId === null);
     const others = current.filter((l) => l.id !== draggedLayer.id);
     const next = position === 'before' ? [draggedLayer, ...others] : [...others, draggedLayer];
-    if (draggedLayer.groupId === null && next.every((l, i) => l.id === current[i].id)) return;
+    if (draggedLayer.groupId === null && sameOrder(next, current)) return;
 
     recordHistory(() => applyLayerSequence(next, null));
   }, [layers, layerGroups, sortedLayers, applyLayerSequence, recordHistory]);
@@ -1456,15 +1344,9 @@ export function LayerPanel({ width, fill = false }: { width?: number; fill?: boo
     const targetIndex = next.findIndex((g) => g.id === targetGroupId);
     if (targetIndex === -1) return;
     next.splice(position === 'before' ? targetIndex : targetIndex + 1, 0, draggedGroup);
-    if (next.every((g, i) => g.id === sortedGroups[i].id)) return;
+    if (sameOrder(next, sortedGroups)) return;
 
-    recordHistory(() => {
-      next.forEach((g, i) => {
-        if (g.order !== i) {
-          reorderLayerGroup(g.id, i);
-        }
-      });
-    });
+    recordHistory(() => next.forEach((g, i) => g.order !== i && reorderLayerGroup(g.id, i)));
   }, [layerGroups, sortedGroups, reorderLayerGroup, recordHistory]);
 
   const handleDropOutsideGroup = useCallback((e: React.DragEvent) => {
@@ -1474,8 +1356,7 @@ export function LayerPanel({ width, fill = false }: { width?: number; fill?: boo
         recordHistory(() => moveLayerToGroup(layer.id, null));
       }
     }
-    // 移動でドラッグ元の要素が作り直されると dragend が届かないので、ドロップ時にも解除する
-    draggedItem = null;
+    endDrag();
   }, [layers, moveLayerToGroup, recordHistory]);
 
   // Shared dialog handlers

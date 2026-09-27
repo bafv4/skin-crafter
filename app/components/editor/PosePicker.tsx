@@ -1,33 +1,23 @@
 // 3D プレビューのポーズ設定（プリセットと、頭・腕・足ごとの角度）
 import { Button } from '@components/ui/button';
 import { Slider } from '@components/ui/slider';
+import { PART_LABELS } from './PartVisibilityPicker';
 import {
   POSE_PART_KEYS,
   POSE_PRESETS,
   POSE_RANGES,
-  DEFAULT_POSE,
   isSamePose,
   type JointAngles,
   type Pose,
   type PosePartKey,
 } from '../../lib/pose';
 
-const PART_LABELS: Record<PosePartKey, string> = {
-  head: '頭',
-  rightArm: '右腕',
-  leftArm: '左腕',
-  rightLeg: '右足',
-  leftLeg: '左足',
-};
+type AxisLabels = Record<keyof JointAngles, string>;
 
-// 各パーツのスライダーの名前（プラス方向の意味）
-const AXIS_LABELS: Record<PosePartKey, Record<keyof JointAngles, string>> = {
-  head: { forward: '上下（＋で上）', side: '左右（＋で左）' },
-  rightArm: { forward: '前後（＋で前）', side: '横（＋で外）' },
-  leftArm: { forward: '前後（＋で前）', side: '横（＋で外）' },
-  rightLeg: { forward: '前後（＋で前）', side: '横（＋で外）' },
-  leftLeg: { forward: '前後（＋で前）', side: '横（＋で外）' },
-};
+// スライダーの名前（プラス方向の意味）。腕・足は共通
+const HEAD_AXIS_LABELS: AxisLabels = { forward: '上下（＋で上）', side: '左右（＋で左）' };
+const LIMB_AXIS_LABELS: AxisLabels = { forward: '前後（＋で前）', side: '横（＋で外）' };
+const axisLabels = (part: PosePartKey) => (part === 'head' ? HEAD_AXIS_LABELS : LIMB_AXIS_LABELS);
 
 const AXES: (keyof JointAngles)[] = ['forward', 'side'];
 
@@ -38,12 +28,7 @@ export function PosePicker({ pose, onChange }: { pose: Pose; onChange: (pose: Po
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-medium">ポーズ</p>
-        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => onChange(DEFAULT_POSE)}>
-          標準に戻す
-        </Button>
-      </div>
+      <p className="text-sm font-medium">ポーズ</p>
 
       <div className="flex flex-wrap gap-1.5" role="group" aria-label="ポーズのプリセット">
         {POSE_PRESETS.map((preset) => {
@@ -69,10 +54,10 @@ export function PosePicker({ pose, onChange }: { pose: Pose; onChange: (pose: Po
             <p className="text-xs font-medium">{PART_LABELS[part]}</p>
             {AXES.map((axis) => {
               const [min, max] = POSE_RANGES[part][axis];
-              const label = `${PART_LABELS[part]}の${AXIS_LABELS[part][axis]}`;
+              const label = `${PART_LABELS[part]}の${axisLabels(part)[axis]}`;
               return (
                 <div key={axis} className="grid grid-cols-[6.5rem_1fr_2.5rem] items-center gap-2">
-                  <span className="text-[11px] text-muted-foreground">{AXIS_LABELS[part][axis]}</span>
+                  <span className="text-[11px] text-muted-foreground">{axisLabels(part)[axis]}</span>
                   <Slider
                     value={[pose[part][axis]]}
                     onValueChange={([v]) => setAngle(part, axis, v)}

@@ -1,12 +1,12 @@
-// 3D プレビューのポーズ（頭・腕・脚の関節の角度）
+// 3D プレビューのポーズ（頭・腕・足の関節の角度）
 // 角度は度で持ち、キャラクター視点の向きで表す（three.js の回転への変換は poseToRotation）
 
 export type PosePartKey = 'head' | 'rightArm' | 'leftArm' | 'rightLeg' | 'leftLeg';
 
 export const POSE_PART_KEYS: readonly PosePartKey[] = ['head', 'rightArm', 'leftArm', 'rightLeg', 'leftLeg'];
 
-// forward: 腕・脚は前へ振る角度、頭は上を向く角度
-// side: 腕・脚は外へ開く角度、頭はキャラクターの左を向く角度
+// forward: 腕・足は前へ振る角度、頭は上を向く角度
+// side: 腕・足は外へ開く角度、頭はキャラクターの左を向く角度
 export interface JointAngles {
   forward: number;
   side: number;
@@ -24,21 +24,20 @@ export function createPose(angles: Partial<Record<PosePartKey, Partial<JointAngl
 
 export const DEFAULT_POSE: Pose = createPose();
 
-export function isDefaultPose(pose: Pose): boolean {
-  return POSE_PART_KEYS.every((key) => pose[key].forward === 0 && pose[key].side === 0);
-}
-
 export function isSamePose(a: Pose, b: Pose): boolean {
   return POSE_PART_KEYS.every((key) => a[key].forward === b[key].forward && a[key].side === b[key].side);
 }
 
 // スライダーの範囲（度）
-export const POSE_RANGES: Record<PosePartKey, { forward: [number, number]; side: [number, number] }> = {
+type AngleRanges = Record<keyof JointAngles, [number, number]>;
+const ARM_RANGES: AngleRanges = { forward: [-180, 180], side: [-20, 180] };
+const LEG_RANGES: AngleRanges = { forward: [-90, 90], side: [-20, 60] };
+export const POSE_RANGES: Record<PosePartKey, AngleRanges> = {
   head: { forward: [-60, 60], side: [-90, 90] },
-  rightArm: { forward: [-180, 180], side: [-20, 180] },
-  leftArm: { forward: [-180, 180], side: [-20, 180] },
-  rightLeg: { forward: [-90, 90], side: [-20, 60] },
-  leftLeg: { forward: [-90, 90], side: [-20, 60] },
+  rightArm: ARM_RANGES,
+  leftArm: ARM_RANGES,
+  rightLeg: LEG_RANGES,
+  leftLeg: LEG_RANGES,
 };
 
 export const POSE_PRESETS: { id: string; label: string; pose: Pose }[] = [
@@ -98,9 +97,9 @@ export const POSE_PRESETS: { id: string; label: string; pose: Pose }[] = [
 const RAD = Math.PI / 180;
 
 // キャラクター視点の角度 → three.js のオイラー角（ラジアン、XYZ 順）。
-// モデルは +Z が正面、キャラクターの左が +X（右腕・右脚は -X 側）
+// モデルは +Z が正面、キャラクターの左が +X（右腕・右足は -X 側）
 export function poseToRotation(part: PosePartKey, angles: JointAngles): [number, number, number] {
-  // X 軸まわりに負の向きへ回すと、下に垂れた腕・脚の先は前（+Z）へ、頭の正面は上へ向く
+  // X 軸まわりに負の向きへ回すと、下に垂れた腕・足の先は前（+Z）へ、頭の正面は上へ向く
   const x = -angles.forward * RAD;
   if (part === 'head') {
     // Y 軸まわりに正の向きへ回すと、正面が +X（キャラクターの左）を向く

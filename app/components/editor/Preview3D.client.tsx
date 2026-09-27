@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { useEditorStore } from '../../stores/editorStore';
 import { SKIN_WIDTH, SKIN_HEIGHT, type ModelType, type RGBA } from '../../types/editor';
 import { DEFAULT_POSE, poseToRotation, type Pose, type PosePartKey } from '../../lib/pose';
+import { canvasToBlob } from '../../lib/skinRenderer';
 
 // Body parts that can be toggled individually in the 3D preview
 export type BodyPartKey = 'head' | 'body' | 'rightArm' | 'leftArm' | 'rightLeg' | 'leftLeg';
@@ -130,18 +131,15 @@ const LEG_OVERLAP = 0.01;
 const LEG_SIZE: [number, number, number] = [0.5, 1.5 + LEG_OVERLAP, 0.5];
 const LEG_Y = -1.125 + LEG_OVERLAP / 2;
 
+// 箱の各面に貼るスキン上の矩形 [x, y, 幅, 高さ]（ピクセル）
+type UvRect = [number, number, number, number];
+export type UvMap = Record<'front' | 'back' | 'top' | 'bottom' | 'right' | 'left', UvRect>;
+
 export function createSkinGeometry(
   width: number,
   height: number,
   depth: number,
-  uvMap: {
-    front: [number, number, number, number];
-    back: [number, number, number, number];
-    top: [number, number, number, number];
-    bottom: [number, number, number, number];
-    right: [number, number, number, number];
-    left: [number, number, number, number];
-  }
+  uvMap: UvMap
 ) {
   const geometry = new THREE.BoxGeometry(width, height, depth);
   const uvAttribute = geometry.getAttribute('uv');
@@ -214,16 +212,9 @@ function BodyPart({
 }: {
   position: [number, number, number];
   size: [number, number, number];
-  uvMap: {
-    front: [number, number, number, number];
-    back: [number, number, number, number];
-    top: [number, number, number, number];
-    bottom: [number, number, number, number];
-    right: [number, number, number, number];
-    left: [number, number, number, number];
-  };
+  uvMap: UvMap;
   texture: THREE.Texture;
-  layer2UvMap?: typeof uvMap;
+  layer2UvMap?: UvMap;
   layer2Extra: number;
   showInner: boolean;
   showLayer2: boolean;
@@ -289,10 +280,106 @@ function Joint({ pivot, rotation, children }: {
   );
 }
 
+// 頭・胴体の位置と大きさ（1 = 8px）。腕は胴体と同じ高さに並ぶ
+const HEAD_Y = 1.595;
+const HEAD_SIZE: [number, number, number] = [1, 1, 1];
+const BODY_Y = 0.375;
+const BODY_SIZE: [number, number, number] = [1, 1.5, 0.5];
 // 胴体の上端・下端（首・腰の高さ）。腕の付け根は Minecraft と同じく上端から 2px 下
-const BODY_TOP = 1.125;
-const BODY_BOTTOM = -0.375;
+const BODY_TOP = BODY_Y + BODY_SIZE[1] / 2;
+const BODY_BOTTOM = BODY_Y - BODY_SIZE[1] / 2;
 const SHOULDER_Y = BODY_TOP - 2 / 8;
+
+const HEAD_UV: UvMap = {
+  front: [8, 8, 8, 8],
+  back: [24, 8, 8, 8],
+  top: [8, 0, 8, 8],
+  bottom: [16, 0, 8, 8],
+  right: [0, 8, 8, 8],
+  left: [16, 8, 8, 8],
+};
+
+const HEAD_LAYER2_UV: UvMap = {
+  front: [40, 8, 8, 8],
+  back: [56, 8, 8, 8],
+  top: [40, 0, 8, 8],
+  bottom: [48, 0, 8, 8],
+  right: [32, 8, 8, 8],
+  left: [48, 8, 8, 8],
+};
+
+const BODY_UV: UvMap = {
+  front: [20, 20, 8, 12],
+  back: [32, 20, 8, 12],
+  top: [20, 16, 8, 4],
+  bottom: [28, 16, 8, 4],
+  right: [16, 20, 4, 12],
+  left: [28, 20, 4, 12],
+};
+
+const BODY_LAYER2_UV: UvMap = {
+  front: [20, 36, 8, 12],
+  back: [32, 36, 8, 12],
+  top: [20, 32, 8, 4],
+  bottom: [28, 32, 8, 4],
+  right: [16, 36, 4, 12],
+  left: [28, 36, 4, 12],
+};
+
+const RIGHT_LEG_UV: UvMap = {
+  front: [4, 20, 4, 12],
+  back: [12, 20, 4, 12],
+  top: [4, 16, 4, 4],
+  bottom: [8, 16, 4, 4],
+  right: [0, 20, 4, 12],
+  left: [8, 20, 4, 12],
+};
+
+const RIGHT_LEG_LAYER2_UV: UvMap = {
+  front: [4, 36, 4, 12],
+  back: [12, 36, 4, 12],
+  top: [4, 32, 4, 4],
+  bottom: [8, 32, 4, 4],
+  right: [0, 36, 4, 12],
+  left: [8, 36, 4, 12],
+};
+
+const LEFT_LEG_UV: UvMap = {
+  front: [20, 52, 4, 12],
+  back: [28, 52, 4, 12],
+  top: [20, 48, 4, 4],
+  bottom: [24, 48, 4, 4],
+  right: [16, 52, 4, 12],
+  left: [24, 52, 4, 12],
+};
+
+const LEFT_LEG_LAYER2_UV: UvMap = {
+  front: [4, 52, 4, 12],
+  back: [12, 52, 4, 12],
+  top: [4, 48, 4, 4],
+  bottom: [8, 48, 4, 4],
+  right: [0, 52, 4, 12],
+  left: [8, 52, 4, 12],
+};
+
+
+// 腕の UV（幅 w = 3 または 4px）
+function armUvMaps(w: number): Record<'rightArmUvMap' | 'rightArmLayer2UvMap' | 'leftArmUvMap' | 'leftArmLayer2UvMap', UvMap> {
+  const arm = (x: number, y: number): UvMap => ({
+    front: [x + 4, y + 4, w, 12],
+    back: [x + 4 + w + 4, y + 4, w, 12],
+    top: [x + 4, y, w, 4],
+    bottom: [x + 4 + w, y, w, 4],
+    right: [x, y + 4, 4, 12],
+    left: [x + 4 + w, y + 4, 4, 12],
+  });
+  return {
+    rightArmUvMap: arm(40, 16),
+    rightArmLayer2UvMap: arm(40, 32),
+    leftArmUvMap: arm(32, 48),
+    leftArmLayer2UvMap: arm(48, 48),
+  };
+}
 
 // Minecraft character model
 function MinecraftCharacter({ modelType, autoRotate, partVisibility, pose }: {
@@ -331,65 +418,22 @@ function MinecraftCharacter({ modelType, autoRotate, partVisibility, pose }: {
   const armWidth = modelType === 'alex' ? 0.375 : 0.5;
   const armPixelWidth = modelType === 'alex' ? 3 : 4;
 
-  // Right arm UV maps (Alex: 3px wide, Steve: 4px wide)
-  const rightArmUvMap = {
-    front: [44, 20, armPixelWidth, 12] as [number, number, number, number],
-    back: [44 + armPixelWidth + 4, 20, armPixelWidth, 12] as [number, number, number, number],
-    top: [44, 16, armPixelWidth, 4] as [number, number, number, number],
-    bottom: [44 + armPixelWidth, 16, armPixelWidth, 4] as [number, number, number, number],
-    right: [40, 20, 4, 12] as [number, number, number, number],
-    left: [44 + armPixelWidth, 20, 4, 12] as [number, number, number, number],
-  };
-  const rightArmLayer2UvMap = {
-    front: [44, 36, armPixelWidth, 12] as [number, number, number, number],
-    back: [44 + armPixelWidth + 4, 36, armPixelWidth, 12] as [number, number, number, number],
-    top: [44, 32, armPixelWidth, 4] as [number, number, number, number],
-    bottom: [44 + armPixelWidth, 32, armPixelWidth, 4] as [number, number, number, number],
-    right: [40, 36, 4, 12] as [number, number, number, number],
-    left: [44 + armPixelWidth, 36, 4, 12] as [number, number, number, number],
-  };
-
-  // Left arm UV maps (Alex: 3px wide, Steve: 4px wide)
-  const leftArmUvMap = {
-    front: [36, 52, armPixelWidth, 12] as [number, number, number, number],
-    back: [36 + armPixelWidth + 4, 52, armPixelWidth, 12] as [number, number, number, number],
-    top: [36, 48, armPixelWidth, 4] as [number, number, number, number],
-    bottom: [36 + armPixelWidth, 48, armPixelWidth, 4] as [number, number, number, number],
-    right: [32, 52, 4, 12] as [number, number, number, number],
-    left: [36 + armPixelWidth, 52, 4, 12] as [number, number, number, number],
-  };
-  const leftArmLayer2UvMap = {
-    front: [52, 52, armPixelWidth, 12] as [number, number, number, number],
-    back: [52 + armPixelWidth + 4, 52, armPixelWidth, 12] as [number, number, number, number],
-    top: [52, 48, armPixelWidth, 4] as [number, number, number, number],
-    bottom: [52 + armPixelWidth, 48, armPixelWidth, 4] as [number, number, number, number],
-    right: [48, 52, 4, 12] as [number, number, number, number],
-    left: [52 + armPixelWidth, 52, 4, 12] as [number, number, number, number],
-  };
+  // 腕の UV と大きさ（Alex は幅 3px、Steve は 4px）。描画のたびに作り直すとジオメトリも作り直されるのでメモ化する
+  const { rightArmUvMap, rightArmLayer2UvMap, leftArmUvMap, leftArmLayer2UvMap } = useMemo(
+    () => armUvMaps(armPixelWidth),
+    [armPixelWidth]
+  );
+  const armSize = useMemo<[number, number, number]>(() => [armWidth, BODY_SIZE[1], BODY_SIZE[2]], [armWidth]);
 
   return (
     <group ref={groupRef} position={[0, 0, 0]}>
       {/* Head */}
       <Joint pivot={[0, BODY_TOP, 0]} rotation={rotationOf('head')}>
       <BodyPart
-        position={[0, 1.595, 0]}
-        size={[1, 1, 1]}
-        uvMap={{
-          front: [8, 8, 8, 8],
-          back: [24, 8, 8, 8],
-          top: [8, 0, 8, 8],
-          bottom: [16, 0, 8, 8],
-          right: [0, 8, 8, 8],
-          left: [16, 8, 8, 8],
-        }}
-        layer2UvMap={{
-          front: [40, 8, 8, 8],
-          back: [56, 8, 8, 8],
-          top: [40, 0, 8, 8],
-          bottom: [48, 0, 8, 8],
-          right: [32, 8, 8, 8],
-          left: [48, 8, 8, 8],
-        }}
+        position={[0, HEAD_Y, 0]}
+        size={HEAD_SIZE}
+        uvMap={HEAD_UV}
+        layer2UvMap={HEAD_LAYER2_UV}
         texture={texture}
         {...partProps('head')}
       />
@@ -397,24 +441,10 @@ function MinecraftCharacter({ modelType, autoRotate, partVisibility, pose }: {
 
       {/* Body */}
       <BodyPart
-        position={[0, 0.375, 0]}
-        size={[1, 1.5, 0.5]}
-        uvMap={{
-          front: [20, 20, 8, 12],
-          back: [32, 20, 8, 12],
-          top: [20, 16, 8, 4],
-          bottom: [28, 16, 8, 4],
-          right: [16, 20, 4, 12],
-          left: [28, 20, 4, 12],
-        }}
-        layer2UvMap={{
-          front: [20, 36, 8, 12],
-          back: [32, 36, 8, 12],
-          top: [20, 32, 8, 4],
-          bottom: [28, 32, 8, 4],
-          right: [16, 36, 4, 12],
-          left: [28, 36, 4, 12],
-        }}
+        position={[0, BODY_Y, 0]}
+        size={BODY_SIZE}
+        uvMap={BODY_UV}
+        layer2UvMap={BODY_LAYER2_UV}
         texture={texture}
         {...partProps('body')}
       />
@@ -422,8 +452,8 @@ function MinecraftCharacter({ modelType, autoRotate, partVisibility, pose }: {
       {/* Right Arm */}
       <Joint pivot={[-0.5 - armWidth / 2, SHOULDER_Y, 0]} rotation={rotationOf('rightArm')}>
         <BodyPart
-          position={[-0.5 - armWidth / 2, 0.375, 0]}
-          size={[armWidth, 1.5, 0.5]}
+          position={[-0.5 - armWidth / 2, BODY_Y, 0]}
+          size={armSize}
           uvMap={rightArmUvMap}
           layer2UvMap={rightArmLayer2UvMap}
           texture={texture}
@@ -434,8 +464,8 @@ function MinecraftCharacter({ modelType, autoRotate, partVisibility, pose }: {
       {/* Left Arm */}
       <Joint pivot={[0.5 + armWidth / 2, SHOULDER_Y, 0]} rotation={rotationOf('leftArm')}>
         <BodyPart
-          position={[0.5 + armWidth / 2, 0.375, 0]}
-          size={[armWidth, 1.5, 0.5]}
+          position={[0.5 + armWidth / 2, BODY_Y, 0]}
+          size={armSize}
           uvMap={leftArmUvMap}
           layer2UvMap={leftArmLayer2UvMap}
           texture={texture}
@@ -448,22 +478,8 @@ function MinecraftCharacter({ modelType, autoRotate, partVisibility, pose }: {
       <BodyPart
         position={[-0.25, LEG_Y, 0]}
         size={LEG_SIZE}
-        uvMap={{
-          front: [4, 20, 4, 12],
-          back: [12, 20, 4, 12],
-          top: [4, 16, 4, 4],
-          bottom: [8, 16, 4, 4],
-          right: [0, 20, 4, 12],
-          left: [8, 20, 4, 12],
-        }}
-        layer2UvMap={{
-          front: [4, 36, 4, 12],
-          back: [12, 36, 4, 12],
-          top: [4, 32, 4, 4],
-          bottom: [8, 32, 4, 4],
-          right: [0, 36, 4, 12],
-          left: [8, 36, 4, 12],
-        }}
+        uvMap={RIGHT_LEG_UV}
+        layer2UvMap={RIGHT_LEG_LAYER2_UV}
         texture={texture}
         {...partProps('rightLeg')}
       />
@@ -474,22 +490,8 @@ function MinecraftCharacter({ modelType, autoRotate, partVisibility, pose }: {
       <BodyPart
         position={[0.25, LEG_Y, 0]}
         size={LEG_SIZE}
-        uvMap={{
-          front: [20, 52, 4, 12],
-          back: [28, 52, 4, 12],
-          top: [20, 48, 4, 4],
-          bottom: [24, 48, 4, 4],
-          right: [16, 52, 4, 12],
-          left: [24, 52, 4, 12],
-        }}
-        layer2UvMap={{
-          front: [4, 52, 4, 12],
-          back: [12, 52, 4, 12],
-          top: [4, 48, 4, 4],
-          bottom: [8, 48, 4, 4],
-          right: [0, 52, 4, 12],
-          left: [8, 52, 4, 12],
-        }}
+        uvMap={LEFT_LEG_UV}
+        layer2UvMap={LEFT_LEG_LAYER2_UV}
         texture={texture}
         {...partProps('leftLeg')}
       />
@@ -621,15 +623,11 @@ function CaptureBridge({ captureRef }: { captureRef: MutableRefObject<Capture3D 
       const previousRatio = gl.getPixelRatio();
       gl.setPixelRatio(captureScale(size.width, size.height, previousRatio));
       gl.render(scene, camera);
-      // toBlob は呼び出した時点の描画内容を写し取るので、描画直後に呼ぶ
-      return new Promise<Blob>((resolve, reject) => {
-        gl.domElement.toBlob((blob) => {
-          if (blob) resolve(blob);
-          else reject(new Error('3D プレビューを画像にできませんでした'));
-        }, 'image/png');
-        gl.setPixelRatio(previousRatio);
-        invalidate();
-      });
+      // toBlob は呼び出した時点の描画内容を写し取るので、描画直後に（倍率を戻す前に）呼ぶ
+      const blob = canvasToBlob(gl.domElement);
+      gl.setPixelRatio(previousRatio);
+      invalidate();
+      return blob;
     };
     return () => {
       captureRef.current = null;

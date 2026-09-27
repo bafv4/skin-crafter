@@ -7,7 +7,6 @@ import {
   POSE_PRESETS,
   POSE_RANGES,
   createPose,
-  isDefaultPose,
   isSamePose,
   poseToRotation,
   type PosePartKey,
@@ -64,7 +63,7 @@ describe('プリセット', () => {
 
   it('標準以外のプリセットはどれも標準と異なり、互いにも異なる', () => {
     const others = POSE_PRESETS.filter((p) => p.id !== 'default');
-    expect(others.every((p) => !isDefaultPose(p.pose))).toBe(true);
+    expect(others.every((p) => !isSamePose(p.pose, DEFAULT_POSE))).toBe(true);
     for (let i = 0; i < others.length; i++) {
       for (let j = i + 1; j < others.length; j++) {
         expect(isSamePose(others[i].pose, others[j].pose)).toBe(false);
@@ -74,6 +73,6 @@ describe('プリセット', () => {
 
   it('createPose は指定のない角度を 0 にする', () => {
     expect(createPose({ head: { side: 10 } }).head).toEqual({ forward: 0, side: 10 });
-    expect(isDefaultPose(DEFAULT_POSE)).toBe(true);
+    expect(isSamePose(createPose(), DEFAULT_POSE)).toBe(true);
   });
 });

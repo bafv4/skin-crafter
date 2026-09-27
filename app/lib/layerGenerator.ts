@@ -479,6 +479,11 @@ function mergeLayerInto(
   return { ...target, opacity: 100, pixels: composeLayerPixels(back, front) };
 }
 
+// ノイズの強い方を残す（レイヤー設定で適用したノイズは向きを符号で持つので、絶対値で比べる）
+function strongerNoise(current: number, fromThreshold: number): number {
+  return Math.abs(current) >= fromThreshold ? current : fromThreshold;
+}
+
 /**
  * Merge similar layers (optional post-processing).
  * Returns new layers with merged pixel data.
@@ -524,12 +529,9 @@ export function mergeSimilarLayers(
       };
       // Apply noise settings if merging with threshold
       if (noiseSettings) {
-        // 強い方を残す（レイヤー設定で適用したノイズは向きを符号で持つので、絶対値で比べる）
-        const stronger = (current: number, fromThreshold: number) =>
-          Math.abs(current) >= fromThreshold ? current : fromThreshold;
         newLayer.noiseSettings = {
-          brightness: stronger(newLayer.noiseSettings.brightness, noiseSettings.brightness),
-          hue: stronger(newLayer.noiseSettings.hue, noiseSettings.hue),
+          brightness: strongerNoise(newLayer.noiseSettings.brightness, noiseSettings.brightness),
+          hue: strongerNoise(newLayer.noiseSettings.hue, noiseSettings.hue),
         };
       }
       newLayers.push(newLayer);

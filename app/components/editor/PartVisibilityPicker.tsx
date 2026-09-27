@@ -10,7 +10,7 @@ import {
 
 type LayerKind = 'inner' | 'outer';
 
-const PART_LABELS: Record<BodyPartKey, string> = {
+export const PART_LABELS: Record<BodyPartKey, string> = {
   head: '頭',
   body: '胴体',
   rightArm: '右腕',
