@@ -95,36 +95,32 @@ export class Compositor {
 
   /**
    * 単一レイヤーを結果バッファにブレンド
-   * Porter-Duff "over" 演算
+   * Porter-Duff "over" 演算。メインスレッドの computeLayerComposite / alphaBlendMut
+   * （app/lib/layerComposite.ts）と同じ式・同じ丸めで計算し、結果を一致させる
    */
   private blendLayer(layer: PixelBuffer, opacity: number): void {
     const src = layer.data;
     const dst = this.result;
     const opacityFactor = opacity / 100;
+    const hasOpacity = opacityFactor < 1;
 
     const length = src.length;
     for (let i = 0; i < length; i += 4) {
-      // ソースのアルファ（不透明度を適用）
-      const srcA = (src[i + 3] * opacityFactor) / 255;
-      if (srcA === 0) continue;
+      // ソースのアルファ（不透明度を掛けてから整数に丸める）
+      const srcAlpha = hasOpacity ? Math.round(src[i + 3] * opacityFactor) : src[i + 3];
+      if (srcAlpha === 0) continue;
 
-      // デスティネーションのアルファ
-      const dstA = dst[i + 3] / 255;
-
+      const fgAlpha = srcAlpha / 255;
+      const bgAlpha = dst[i + 3] / 255;
       // 出力アルファ: αout = αsrc + αdst × (1 - αsrc)
-      const outA = srcA + dstA * (1 - srcA);
+      const outAlpha = fgAlpha + bgAlpha * (1 - fgAlpha);
 
-      if (outA > 0) {
-        // 各チャンネルのウェイト
-        const srcW = srcA / outA;
-        const dstW = (dstA * (1 - srcA)) / outA;
-
-        // RGB チャンネルをブレンド
-        dst[i] = Math.round(src[i] * srcW + dst[i] * dstW);
-        dst[i + 1] = Math.round(src[i + 1] * srcW + dst[i + 1] * dstW);
-        dst[i + 2] = Math.round(src[i + 2] * srcW + dst[i + 2] * dstW);
-        dst[i + 3] = Math.round(outA * 255);
-      }
+      const invOutAlpha = 1 / outAlpha;
+      const bgContrib = bgAlpha * (1 - fgAlpha);
+      dst[i] = Math.round((src[i] * fgAlpha + dst[i] * bgContrib) * invOutAlpha);
+      dst[i + 1] = Math.round((src[i + 1] * fgAlpha + dst[i + 1] * bgContrib) * invOutAlpha);
+      dst[i + 2] = Math.round((src[i + 2] * fgAlpha + dst[i + 2] * bgContrib) * invOutAlpha);
+      dst[i + 3] = Math.round(outAlpha * 255);
     }
   }
 

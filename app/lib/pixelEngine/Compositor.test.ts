@@ -140,14 +140,6 @@ function compositeViaMainThread(layers: Layer[], groups: LayerGroup[]): number[]
   return out;
 }
 
-// 2 つの合成結果のチャンネルごとの最大差
-function maxChannelDiff(a: number[], b: number[]): number {
-  expect(a).toHaveLength(b.length);
-  let max = 0;
-  for (let i = 0; i < a.length; i++) max = Math.max(max, Math.abs(a[i] - b[i]));
-  return max;
-}
-
 // グループ・順序・表示状態が入り混じったシナリオ
 function mixedScenario(
   rand: (n: number) => number,
@@ -572,37 +564,36 @@ describe('メインスレッドの computeLayerComposite との一致', () => {
     expect(compositeViaWorker(layers, groups)).toEqual(compositeViaMainThread(layers, groups));
   });
 
-  it('半透明ピクセル（不透明度 100%）でも一致する（.5 ちょうどの丸め境界による ±1 の誤差のみ許容）', () => {
+  it('半透明ピクセル（不透明度 100%）でも完全に一致する', () => {
     const rand = createRandom(2);
     const { layers, groups } = mixedScenario(rand, () => rand(256));
 
-    const worker = compositeViaWorker(layers, groups);
-    const main = compositeViaMainThread(layers, groups);
-    expect(maxChannelDiff(worker, main)).toBeLessThanOrEqual(1);
+    expect(compositeViaWorker(layers, groups)).toEqual(compositeViaMainThread(layers, groups));
   });
 
-  it('不透明度を掛けた実効アルファが整数になる場合は一致する（.5 ちょうどの丸め境界による ±1 の誤差のみ許容）', () => {
+  it('不透明度を掛けた実効アルファが整数になる場合も完全に一致する', () => {
     const rand = createRandom(3);
     // 不透明度 20/40/60/80% × 5 の倍数のアルファ、50% × 偶数のアルファ → 実効アルファは整数
-    // （メインスレッド版は実効アルファを整数に丸めてからブレンドするため、
-    //   小数になるケースは比較対象外）
     const opacities = [20, 40, 60, 80, 100, 20, 40, 60, 80];
     const fifths = mixedScenario(rand, () => rand(52) * 5, (i) => opacities[i]);
     const rand2 = createRandom(4);
     const half = mixedScenario(rand2, () => rand2(128) * 2, () => 50);
 
-    expect(
-      maxChannelDiff(
-        compositeViaWorker(fifths.layers, fifths.groups),
-        compositeViaMainThread(fifths.layers, fifths.groups)
-      )
-    ).toBeLessThanOrEqual(1);
-    expect(
-      maxChannelDiff(
-        compositeViaWorker(half.layers, half.groups),
-        compositeViaMainThread(half.layers, half.groups)
-      )
-    ).toBeLessThanOrEqual(1);
+    expect(compositeViaWorker(fifths.layers, fifths.groups)).toEqual(
+      compositeViaMainThread(fifths.layers, fifths.groups)
+    );
+    expect(compositeViaWorker(half.layers, half.groups)).toEqual(
+      compositeViaMainThread(half.layers, half.groups)
+    );
+  });
+
+  it('任意の不透明度（実効アルファが小数になる場合）でも完全に一致する', () => {
+    for (const seed of [11, 12, 13]) {
+      const rand = createRandom(seed);
+      const { layers, groups } = mixedScenario(rand, () => rand(256), () => rand(101));
+
+      expect(compositeViaWorker(layers, groups)).toEqual(compositeViaMainThread(layers, groups));
+    }
   });
 
   it('全レイヤー非表示・非表示グループのみの場合はどちらも完全透明', () => {
