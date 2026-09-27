@@ -12,8 +12,12 @@ Skin Crafter はブラウザベースの Minecraft スキンエディタ。React
 - `pnpm build` — プロダクションビルド（React Router + Vite）
 - `pnpm typecheck` — `react-router typegen` 実行後に `tsc`
 - `pnpm start` — プロダクションビルドの配信
+- `pnpm test` — Vitest で全テストを実行（`pnpm test:watch` で監視モード）
+- `pnpm vitest run app/stores/editorStore.test.ts` — 単一ファイルのテスト実行（`-t "テスト名"` で絞り込み）
 
-テストランナーは未設定。変更の検証には `pnpm typecheck` を使用する。
+変更の検証には `pnpm test` と `pnpm typecheck` を使用する。
+
+**テスト:** Vitest（設定は `vitest.config.ts`。React Router プラグインは読み込まない）。テストは対象ファイルの隣に `*.test.ts(x)` として置く。既定の環境は node で、DOM が必要なファイルは先頭に `// @vitest-environment jsdom` を付ける。ストアを読み込むテストでは、Web Worker を起動しないよう `vi.mock('../lib/pixelEngine', () => import('../test/pixelEngineMock'))` で PixelEngine をモックし、`fake-indexeddb/auto` を読み込む。ストアはモジュール単位のシングルトンなので、テストごとに `useEditorStore.setState(useEditorStore.getInitialState(), true)` などで初期化する（永続化・読み込みの検証は `vi.resetModules()` と動的 import を使う。`editorStore.persist.test.ts` を参照）。
 
 ## アーキテクチャ
 
