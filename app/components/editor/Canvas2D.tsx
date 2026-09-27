@@ -541,7 +541,7 @@ function getHintItems(tool: ToolType): HintItem[] {
     { keys: ['左クリック'], label: TOOL_CLICK_HINTS[tool] },
     { keys: ['右ドラッグ'], label: 'キャンバスを移動' },
     { keys: ['ホイール'], label: '拡大・縮小' },
-    { keys: ['Ctrl+Z', 'Ctrl+Y'], label: '元に戻す・やり直し' },
+    { keys: ['Ctrl/⌘+Z', 'Ctrl/⌘+Y'], label: '元に戻す・やり直し' },
     { keys: ['P', 'E', 'R', 'Shift+E', 'I'], label: 'ツール切替' },
   ];
 }

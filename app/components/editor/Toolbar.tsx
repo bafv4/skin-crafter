@@ -206,7 +206,7 @@ export function Toolbar() {
             </Button>
           </TooltipTrigger>
           <TooltipContent side="right">
-            <p>元に戻す (Ctrl+Z)</p>
+            <p>元に戻す (Ctrl/⌘+Z)</p>
           </TooltipContent>
         </Tooltip>
 
@@ -223,7 +223,7 @@ export function Toolbar() {
             </Button>
           </TooltipTrigger>
           <TooltipContent side="right">
-            <p>やり直し (Ctrl+Y)</p>
+            <p>やり直し (Ctrl/⌘+Y)</p>
           </TooltipContent>
         </Tooltip>
       </div>
