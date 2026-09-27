@@ -604,6 +604,9 @@ function ensureActiveLayer(state: EditorState, set: (partial: Partial<EditorStat
     pixels: createEmptyLayerPixels(),
   };
 
+  // PixelEngine にも登録する（描いたピクセルが Worker 側に反映されるように）
+  getPixelEngine().createLayer(id, newLayer.order);
+
   set({
     layers: [...state.layers, newLayer],
     activeLayerId: id,
@@ -940,11 +943,14 @@ export const useEditorStore = create<EditorState>()(
     const colorToUse = color === null ? null : (layer.layerType === 'direct' ? color : layer.baseColor);
 
     // Directly mutate pixels for performance
+    const engine = getPixelEngine();
+    let skippedAny = false;
     for (let y = minY; y <= maxY; y++) {
       const row = layerPixels[y];
       for (let x = minX; x <= maxX; x++) {
         const existingPixel = row[x];
         if (preservePixels && existingPixel && existingPixel.a > 0) {
+          skippedAny = true;
           continue;
         }
         row[x] = colorToUse ? { ...colorToUse } : null;
@@ -952,8 +958,19 @@ export const useEditorStore = create<EditorState>()(
     }
 
     // Send to PixelEngine for high-performance rendering
-    const engine = getPixelEngine();
-    if (colorToUse) {
+    if (skippedAny) {
+      // 上書き禁止で残したピクセルがある場合は、実際に塗ったピクセルだけを送る
+      for (let y = minY; y <= maxY; y++) {
+        for (let x = minX; x <= maxX; x++) {
+          const pixel = layerPixels[y][x];
+          if (pixel) {
+            engine.setPixel(activeLayerId, x, y, pixel.r, pixel.g, pixel.b, pixel.a);
+          } else {
+            engine.erasePixel(activeLayerId, x, y);
+          }
+        }
+      }
+    } else if (colorToUse) {
       engine.setPixelRect(activeLayerId, minX, minY, maxX, maxY, colorToUse.r, colorToUse.g, colorToUse.b, colorToUse.a);
     } else {
       engine.erasePixelRect(activeLayerId, minX, minY, maxX, maxY);
@@ -1190,6 +1207,7 @@ export const useEditorStore = create<EditorState>()(
   },
 
   reorderLayer: (layerId, newOrder, newGroupId) => {
+    getPixelEngine().setLayerOrder(layerId, newOrder);
     set((state) => ({
       layers: state.layers.map((l) =>
         l.id === layerId ? { ...l, order: newOrder, groupId: newGroupId } : l
@@ -1308,6 +1326,7 @@ export const useEditorStore = create<EditorState>()(
 
       const targetLayers = state.layers.filter((l) => l.groupId === groupId);
       const maxOrder = targetLayers.length > 0 ? Math.max(...targetLayers.map(l => l.order)) : -1;
+      getPixelEngine().setLayerOrder(layerId, maxOrder + 1);
 
       return {
         layers: state.layers.map((l) =>
