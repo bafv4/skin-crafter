@@ -1043,11 +1043,6 @@ const LayerGroupItem = memo(function LayerGroupItem({
   const updateLayerGroupName = useEditorStore((state) => state.updateLayerGroupName);
 
   const [isRenaming, setIsRenaming] = useState(false);
-  // 名前のシングルクリック（開閉）はダブルクリック判定のため少し遅らせて実行する
-  const collapseTimerRef = useRef<number | null>(null);
-  useEffect(() => () => {
-    if (collapseTimerRef.current !== null) window.clearTimeout(collapseTimerRef.current);
-  }, []);
 
   const [dropTarget, setDropTarget] = useState(false);
   const [groupDropPosition, setGroupDropPosition] = useState<'before' | 'after' | null>(null);
@@ -1136,7 +1131,7 @@ const LayerGroupItem = memo(function LayerGroupItem({
         <div className="flex items-center gap-2 flex-1 min-w-0">
           <button
             onClick={() => toggleLayerGroupCollapsed(group.id)}
-            className="shrink-0"
+            className="shrink-0 rounded p-0.5 -m-0.5 hover:bg-muted"
             aria-label={group.collapsed ? 'グループを展開' : 'グループを折りたたむ'}
           >
             {group.collapsed ? (
@@ -1152,23 +1147,11 @@ const LayerGroupItem = memo(function LayerGroupItem({
               onClose={() => setIsRenaming(false)}
             />
           ) : (
+            // 開閉は左の矢印ボタンのみ。名前はダブルクリックで変更する
             <span
-              className="flex-1 min-w-0 text-left text-sm font-medium truncate"
+              className="flex-1 min-w-0 text-left text-sm font-medium truncate cursor-default"
               title="ダブルクリックで名前を変更"
-              onClick={(e) => {
-                if (e.detail > 1) return;
-                collapseTimerRef.current = window.setTimeout(() => {
-                  collapseTimerRef.current = null;
-                  toggleLayerGroupCollapsed(group.id);
-                }, 250);
-              }}
-              onDoubleClick={() => {
-                if (collapseTimerRef.current !== null) {
-                  window.clearTimeout(collapseTimerRef.current);
-                  collapseTimerRef.current = null;
-                }
-                setIsRenaming(true);
-              }}
+              onDoubleClick={() => setIsRenaming(true)}
             >
               {group.name}
             </span>
