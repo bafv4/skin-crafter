@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { persist, createJSONStorage, type StateStorage } from 'zustand/middleware';
+import { persist, type PersistStorage, type StorageValue } from 'zustand/middleware';
 import {
   type Layer,
   type LayerGroup,
@@ -595,46 +595,158 @@ function ensureActiveLayer(state: EditorState, set: (partial: Partial<EditorStat
   return id;
 }
 
-// IndexedDB storage adapter for Zustand persist
-const idbStorage: StateStorage = {
-  getItem: async (name: string): Promise<string | null> => {
-    const db = await openIDB();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction('store', 'readonly');
-      const req = tx.objectStore('store').get(name);
-      req.onsuccess = () => resolve(req.result ?? null);
-      req.onerror = () => reject(req.error);
-    });
-  },
-  setItem: async (name: string, value: string): Promise<void> => {
-    const db = await openIDB();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction('store', 'readwrite');
-      tx.objectStore('store').put(value, name);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  },
-  removeItem: async (name: string): Promise<void> => {
-    const db = await openIDB();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction('store', 'readwrite');
-      tx.objectStore('store').delete(name);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  },
-};
+// ---- 永続化（IndexedDB） ----
+// Zustand の persist は set() のたびに storage.setItem を呼ぶ（1ピクセル描くごと・ホバーごとなど）。
+// そのまま JSON 化して書き込むと重いため、PersistStorage のレベルで
+//   1. 永続化対象のフィールドが参照レベルで変わっていなければ何もしない
+//   2. 変わっていれば最新の値だけを保持し、一定時間まとめてから JSON 化して書き込む
+//   3. 前回書き込んだ JSON と同一なら書き込まない
+// ようにしている。ページを閉じる・非表示にするときは待たずに書き込む。
+
+const IDB_NAME = 'skin-crafter';
+const IDB_STORE = 'store';
+// 最後の変更からこの時間が経ったら書き込む
+const PERSIST_DEBOUNCE_MS = 400;
+// 変更が続いても、最初の未保存の変更からこの時間以内には書き込む
+const PERSIST_MAX_WAIT_MS = 2000;
+
+// 接続は使い回す（閉じられた・エラーになった場合は次回開き直す）
+let idbPromise: Promise<IDBDatabase> | null = null;
 
 function openIDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open('skin-crafter', 1);
-    req.onupgradeneeded = () => {
-      req.result.createObjectStore('store');
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
+  if (!idbPromise) {
+    idbPromise = new Promise<IDBDatabase>((resolve, reject) => {
+      const req = indexedDB.open(IDB_NAME, 1);
+      req.onupgradeneeded = () => {
+        req.result.createObjectStore(IDB_STORE);
+      };
+      req.onsuccess = () => {
+        const db = req.result;
+        db.onclose = () => {
+          idbPromise = null;
+        };
+        db.onversionchange = () => {
+          db.close();
+          idbPromise = null;
+        };
+        resolve(db);
+      };
+      req.onerror = () => reject(req.error);
+    }).catch((error) => {
+      idbPromise = null;
+      throw error;
+    });
+  }
+  return idbPromise;
+}
+
+function idbRequest<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
+  return openIDB().then(
+    (db) =>
+      new Promise<T>((resolve, reject) => {
+        const tx = db.transaction(IDB_STORE, mode);
+        const req = run(tx.objectStore(IDB_STORE));
+        tx.oncomplete = () => resolve(req.result);
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
+        // タスク終了を待たずにコミットする（ページを閉じる直前の書き込みが中断されにくくなる）
+        if (mode === 'readwrite') tx.commit?.();
+      })
+  );
+}
+
+// Persisted state subset (no actions, no transient state)
+type PersistedState = Pick<EditorState, 'layers' | 'layerGroups' | 'palette' | 'modelType' | 'showLayer2' | 'preservePixels' | 'canvasBackground'>;
+
+const PERSISTED_KEYS = ['layers', 'layerGroups', 'palette', 'modelType', 'showLayer2', 'preservePixels', 'canvasBackground'] as const satisfies readonly (keyof PersistedState)[];
+
+// ストアは常に新しい配列・オブジェクトで更新されるため、参照比較で変更を検出できる
+function isSamePersistedState(a: PersistedState, b: PersistedState): boolean {
+  return PERSISTED_KEYS.every((key) => Object.is(a[key], b[key]));
+}
+
+function createIdbPersistStorage(): PersistStorage<PersistedState> {
+  // 最後に受け取った永続化対象の値（変更検出用）
+  let lastSeen: PersistedState | null = null;
+  // 最後に書き込んだ（または読み込んだ）JSON
+  let lastWritten: string | null = null;
+  let pending: { name: string; value: StorageValue<PersistedState> } | null = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let pendingSince = 0;
+
+  const cancelPending = () => {
+    if (timer !== null) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    pending = null;
+  };
+
+  const flush = () => {
+    if (timer !== null) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    if (!pending) return;
+    const { name, value } = pending;
+    pending = null;
+    const json = JSON.stringify(value);
+    if (json === lastWritten) return;
+    lastWritten = json;
+    idbRequest('readwrite', (store) => store.put(json, name)).catch((error) => {
+      // 次回の set() で（永続化対象が変わっていなくても）再度書き込めるようにする
+      lastWritten = null;
+      lastSeen = null;
+      console.error('[skin-crafter] プロジェクトの保存に失敗しました', error);
+    });
+  };
+
+  const schedule = () => {
+    const now = performance.now();
+    if (timer === null) {
+      pendingSince = now;
+    } else {
+      clearTimeout(timer);
+    }
+    const wait = Math.min(PERSIST_DEBOUNCE_MS, PERSIST_MAX_WAIT_MS - (now - pendingSince));
+    timer = setTimeout(flush, Math.max(0, wait));
+  };
+
+  // ページを閉じる・別タブに切り替えるときは待たずに書き込む
+  if (typeof window !== 'undefined') {
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') flush();
+    });
+  }
+
+  return {
+    getItem: async (name) => {
+      const json = await idbRequest<string | undefined>('readonly', (store) => store.get(name));
+      if (typeof json !== 'string') return null;
+      const value = JSON.parse(json) as StorageValue<PersistedState>;
+      // 読み込み完了前の set() で積まれた書き込み（初期状態）は、保存済みの内容を
+      // 上書きしてしまうので破棄する（永続化対象はこの後、読み込んだ値で置き換えられる）
+      cancelPending();
+      // 読み込んだ内容をそのまま書き戻さないよう、変更検出の基準にする
+      // （persist の merge は読み込んだオブジェクトをそのままストアに入れる）
+      lastWritten = json;
+      lastSeen = value.state;
+      return value;
+    },
+    setItem: (name, value) => {
+      if (lastSeen && isSamePersistedState(lastSeen, value.state)) return;
+      lastSeen = value.state;
+      pending = { name, value };
+      schedule();
+    },
+    removeItem: (name) => {
+      cancelPending();
+      lastSeen = null;
+      lastWritten = null;
+      return idbRequest('readwrite', (store) => store.delete(name));
+    },
+  };
 }
 
 // PixelEngine sync after hydration
@@ -646,9 +758,6 @@ function syncLayersToEngine(layers: Layer[]) {
     engine.setLayerData(layer.id, layer.order, layerPixelsToUint8(layer.pixels));
   }
 }
-
-// Persisted state subset (no actions, no transient state)
-type PersistedState = Pick<EditorState, 'layers' | 'layerGroups' | 'palette' | 'modelType' | 'showLayer2' | 'preservePixels' | 'canvasBackground'>;
 
 export const useEditorStore = create<EditorState>()(
   persist(
@@ -1631,7 +1740,7 @@ export const useEditorStore = create<EditorState>()(
 }),
     {
       name: 'skin-crafter-project',
-      storage: createJSONStorage(() => idbStorage),
+      storage: createIdbPersistStorage(),
       partialize: (state): PersistedState => ({
         layers: state.layers,
         layerGroups: state.layerGroups,
