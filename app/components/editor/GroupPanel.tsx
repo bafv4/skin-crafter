@@ -1,4 +1,4 @@
-import { useState, memo, useCallback, useMemo, useEffect } from 'react';
+import { useState, memo, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useStoreWithEqualityFn } from 'zustand/traditional';
 import { Pipette, Plus, Trash2, Wand2, Merge, GitMerge, RefreshCw, GripVertical, ChevronRight, ChevronDown, FolderPlus, Palette, PaintBucket, Settings2, Eye, EyeOff, Copy, MoreHorizontal } from 'lucide-react';
@@ -731,6 +731,56 @@ function LayerDetailDialog({
   );
 }
 
+// 名前のインライン編集（ダブルクリックで開始）
+// Enter / フォーカスアウトで確定、Esc でキャンセル。空の名前は無視する
+function InlineNameInput({
+  initialName,
+  onCommit,
+  onClose,
+}: {
+  initialName: string;
+  onCommit: (name: string) => void;
+  onClose: () => void;
+}) {
+  const [value, setValue] = useState(initialName);
+  const doneRef = useRef(false);
+
+  const finish = (commit: boolean) => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    const trimmed = value.trim();
+    if (commit && trimmed && trimmed !== initialName) {
+      onCommit(trimmed);
+    }
+    onClose();
+  };
+
+  return (
+    <Input
+      autoFocus
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onFocus={(e) => e.currentTarget.select()}
+      onBlur={() => finish(true)}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          finish(true);
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          finish(false);
+        }
+      }}
+      onClick={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
+      aria-label="名前"
+      className="h-6 flex-1 min-w-0 px-1.5 py-0 text-sm font-medium"
+    />
+  );
+}
+
 // Layer item component - optimized with memo and shallow selectors
 const LayerItem = memo(function LayerItem({
   layerId,
@@ -773,8 +823,10 @@ const LayerItem = memo(function LayerItem({
   const updateLayerColor = useEditorStore((state) => state.updateLayerColor);
   const toggleLayerVisibility = useEditorStore((state) => state.toggleLayerVisibility);
   const duplicateLayer = useEditorStore((state) => state.duplicateLayer);
+  const updateLayerName = useEditorStore((state) => state.updateLayerName);
 
   const [dropPosition, setDropPosition] = useState<'before' | 'after' | null>(null);
+  const [isRenaming, setIsRenaming] = useState(false);
   const canMerge = layerCount > 1;
 
   if (!layer) return null;
@@ -819,7 +871,7 @@ const LayerItem = memo(function LayerItem({
           onClick={() => setActiveLayer(layerId)}
           onMouseEnter={() => setHighlightedLayer(layerId)}
           onMouseLeave={() => setHighlightedLayer(null)}
-          draggable
+          draggable={!isRenaming}
           onDragStart={(e) => onDragStart?.(e, layerId)}
           onDragEnd={onDragEnd}
           onDragOver={handleDragOver}
@@ -883,9 +935,24 @@ const LayerItem = memo(function LayerItem({
             </Tooltip>
           )}
 
-          <span className="flex-1 text-sm font-medium truncate">
-            {layer.name}
-          </span>
+          {isRenaming ? (
+            <InlineNameInput
+              initialName={layer.name}
+              onCommit={(name) => updateLayerName(layerId, name)}
+              onClose={() => setIsRenaming(false)}
+            />
+          ) : (
+            <span
+              className="flex-1 text-sm font-medium truncate cursor-text"
+              title="ダブルクリックで名前を変更"
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                setIsRenaming(true);
+              }}
+            >
+              {layer.name}
+            </span>
+          )}
         </div>
 
         {/* Row 2: Action buttons */}
@@ -973,6 +1040,14 @@ const LayerGroupItem = memo(function LayerGroupItem({
   const toggleLayerGroupCollapsed = useEditorStore((state) => state.toggleLayerGroupCollapsed);
   const deleteLayerGroup = useEditorStore((state) => state.deleteLayerGroup);
   const toggleLayerGroupVisibility = useEditorStore((state) => state.toggleLayerGroupVisibility);
+  const updateLayerGroupName = useEditorStore((state) => state.updateLayerGroupName);
+
+  const [isRenaming, setIsRenaming] = useState(false);
+  // 名前のシングルクリック（開閉）はダブルクリック判定のため少し遅らせて実行する
+  const collapseTimerRef = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (collapseTimerRef.current !== null) window.clearTimeout(collapseTimerRef.current);
+  }, []);
 
   const [dropTarget, setDropTarget] = useState(false);
   const [groupDropPosition, setGroupDropPosition] = useState<'before' | 'after' | null>(null);
@@ -1053,24 +1128,52 @@ const LayerGroupItem = memo(function LayerGroupItem({
         >
         <div
           className="flex items-center gap-2 p-2 cursor-pointer hover:bg-muted/50"
-          draggable
+          draggable={!isRenaming}
           onDragStart={(e) => onDragStart?.(e, group.id, 'group')}
           onDragEnd={onDragEnd}
         >
         <GripVertical className="h-4 w-4 shrink-0 cursor-grab text-muted-foreground/50 hover:text-muted-foreground" />
-        <button
-          onClick={() => toggleLayerGroupCollapsed(group.id)}
-          className="flex items-center gap-2 flex-1 min-w-0"
-        >
-          {group.collapsed ? (
-            <ChevronRight className="h-4 w-4 shrink-0" />
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          <button
+            onClick={() => toggleLayerGroupCollapsed(group.id)}
+            className="shrink-0"
+            aria-label={group.collapsed ? 'グループを展開' : 'グループを折りたたむ'}
+          >
+            {group.collapsed ? (
+              <ChevronRight className="h-4 w-4" />
+            ) : (
+              <ChevronDown className="h-4 w-4" />
+            )}
+          </button>
+          {isRenaming ? (
+            <InlineNameInput
+              initialName={group.name}
+              onCommit={(name) => updateLayerGroupName(group.id, name)}
+              onClose={() => setIsRenaming(false)}
+            />
           ) : (
-            <ChevronDown className="h-4 w-4 shrink-0" />
+            <span
+              className="flex-1 min-w-0 text-left text-sm font-medium truncate"
+              title="ダブルクリックで名前を変更"
+              onClick={(e) => {
+                if (e.detail > 1) return;
+                collapseTimerRef.current = window.setTimeout(() => {
+                  collapseTimerRef.current = null;
+                  toggleLayerGroupCollapsed(group.id);
+                }, 250);
+              }}
+              onDoubleClick={() => {
+                if (collapseTimerRef.current !== null) {
+                  window.clearTimeout(collapseTimerRef.current);
+                  collapseTimerRef.current = null;
+                }
+                setIsRenaming(true);
+              }}
+            >
+              {group.name}
+            </span>
           )}
-          <span className="text-sm font-medium truncate">
-            {group.name}
-          </span>
-        </button>
+        </div>
 
         <Tooltip>
           <TooltipTrigger asChild>
