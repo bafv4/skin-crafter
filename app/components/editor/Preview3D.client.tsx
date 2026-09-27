@@ -558,6 +558,10 @@ export function Preview3DCanvas({
     <Canvas
       camera={{ position: [3 / zoom, 2 / zoom, 3 / zoom], fov: 45 }}
       frameloop="demand"
+      // 2Dキャンバスと同じ色で表示するため、R3F 既定のトーンマッピング（ACES）と
+      // sRGB 出力変換を無効化する。テクスチャ（NoColorSpace）のピクセル値がそのまま出力される
+      flat
+      linear
     >
       <RenderController autoRotate={autoRotate} />
       <Scene autoRotate={autoRotate} zoom={zoom} onZoomChange={onZoomChange} resetKey={resetKey} partVisibility={partVisibility} />
