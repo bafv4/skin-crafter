@@ -661,11 +661,26 @@ type PersistedState = Pick<EditorState, 'layers' | 'layerGroups' | 'palette' | '
 const PERSISTED_KEYS = ['layers', 'layerGroups', 'palette', 'modelType', 'showLayer2', 'preservePixels', 'canvasBackground'] as const satisfies readonly (keyof PersistedState)[];
 
 // ストアは常に新しい配列・オブジェクトで更新されるため、参照比較で変更を検出できる
+const PERSIST_VERSION = 0;
+
+function partializeState(state: EditorState): PersistedState {
+  return {
+    layers: state.layers,
+    layerGroups: state.layerGroups,
+    palette: state.palette,
+    modelType: state.modelType,
+    showLayer2: state.showLayer2,
+    preservePixels: state.preservePixels,
+    canvasBackground: state.canvasBackground,
+  };
+}
+
 function isSamePersistedState(a: PersistedState, b: PersistedState): boolean {
   return PERSISTED_KEYS.every((key) => Object.is(a[key], b[key]));
 }
 
-function createIdbPersistStorage(): PersistStorage<PersistedState> {
+// getInitialJson: 初期状態を書き込んだ場合の JSON（読み込み失敗時の上書き防止に使う）
+function createIdbPersistStorage(getInitialJson: () => string): PersistStorage<PersistedState> {
   // 最後に受け取った永続化対象の値（変更検出用）
   let lastSeen: PersistedState | null = null;
   // 最後に書き込んだ（または読み込んだ）JSON
@@ -737,6 +752,11 @@ function createIdbPersistStorage(): PersistStorage<PersistedState> {
         lastWritten = json;
         lastSeen = value.state;
         return value;
+      } catch (error) {
+        // 読み込めなかった保存データを、初期状態（空）の書き込みで上書きしないよう、
+        // 初期状態を「書き込み済み」とみなす（実際に変更されたときだけ書き込まれる）
+        lastWritten = getInitialJson();
+        throw error;
       } finally {
         hydrated = true;
         // 保存データがなかった（初回訪問）・読み込みに失敗した場合は、積まれていた書き込みを行う
@@ -1749,24 +1769,32 @@ export const useEditorStore = create<EditorState>()(
 }),
     {
       name: 'skin-crafter-project',
-      storage: createIdbPersistStorage(),
-      partialize: (state): PersistedState => ({
-        layers: state.layers,
-        layerGroups: state.layerGroups,
-        palette: state.palette,
-        modelType: state.modelType,
-        showLayer2: state.showLayer2,
-        preservePixels: state.preservePixels,
-        canvasBackground: state.canvasBackground,
-      }),
-      // 読み込み前に計算された（空の）合成結果が残らないよう、キャッシュを捨てて再描画させる
-      merge: (persistedState, currentState) => ({
-        ...currentState,
-        ...(persistedState as Partial<PersistedState> | undefined),
-        compositeCache: null,
-        previewVersion: currentState.previewVersion + 1,
-      }),
-      onRehydrateStorage: () => (state) => {
+      version: PERSIST_VERSION,
+      storage: createIdbPersistStorage((): string =>
+        JSON.stringify({ state: partializeState(useEditorStore.getInitialState()), version: PERSIST_VERSION })
+      ),
+      partialize: partializeState,
+      merge: (persistedState, currentState) => {
+        const persisted = persistedState as Partial<PersistedState> | undefined;
+        if (persisted) {
+          // 読み込み前の操作（読み込み中に描き始めたストロークなど）の元に戻す情報は、
+          // 読み込んだプロジェクトと対応しないので捨てる
+          // （残すと、元に戻したときに読み込んだレイヤーが「追加されたもの」として消える）
+          clearSnapshot();
+        }
+        return {
+          ...currentState,
+          ...persisted,
+          ...(persisted ? { history: [], historyIndex: -1, activeLayerId: null } : {}),
+          // 読み込み前に計算された（空の）合成結果が残らないよう、キャッシュを捨てて再描画させる
+          compositeCache: null,
+          previewVersion: currentState.previewVersion + 1,
+        };
+      },
+      onRehydrateStorage: () => (state, error) => {
+        if (error) {
+          console.error('[skin-crafter] 保存データを読み込めませんでした', error);
+        }
         if (state?.layers && state.layers.length > 0) {
           syncLayersToEngine(state.layers);
         }

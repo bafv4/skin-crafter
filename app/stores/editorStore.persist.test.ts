@@ -948,6 +948,51 @@ describe('読み込み完了前の書き込み', () => {
 });
 
 // ================================================================
+// 読み込み中に始めた操作と元に戻す
+// ================================================================
+describe('読み込み中に始めた操作と元に戻す', () => {
+  it('読み込み中に描き始めたストロークを読み込み後に元に戻しても、読み込んだプロジェクトは消えない', async () => {
+    const project = sampleProject();
+    await seedProject(project);
+    const release = await holdObjectStore();
+    const getSpy = vi.spyOn(IDBObjectStore.prototype, 'get');
+
+    const { useEditorStore } = await loadStore();
+    const s = () => useEditorStore.getState();
+    await waitUntilReadIssued(getSpy);
+
+    // 読み込み完了前に描き始める（レイヤーが自動作成され、元に戻す用のスナップショットが取られる）
+    s().setPixel(10, 10, RED);
+
+    await release();
+    await waitForHydration(useEditorStore);
+    // 読み込み前の履歴は残らない
+    expect(s().history).toEqual([]);
+    expect(s().historyIndex).toBe(-1);
+
+    // 読み込み後に同じストロークを続けて確定し、元に戻す
+    s().setPixel(11, 10, RED);
+    s().commitDrawing();
+    s().undo();
+
+    // 読み込んだレイヤー・グループはそのまま残る
+    for (const layer of project.state.layers) {
+      const current = s().layers.find((l) => l.id === layer.id);
+      expect(current?.pixels).toEqual(layer.pixels);
+    }
+    expect(s().layerGroups).toEqual(project.state.layerGroups);
+
+    // 保存されるのも、読み込んだプロジェクトが残った状態
+    vi.advanceTimersByTime(MAX_WAIT_MS);
+    firePageHide();
+    await waitForIdb();
+    const saved = await readSaved();
+    expect(saved.state.layers.map((l) => l.id)).toEqual(expect.arrayContaining(['layer-a', 'layer-b']));
+    expect(saved.state.layerGroups).toEqual(project.state.layerGroups);
+  });
+});
+
+// ================================================================
 // 初回訪問（保存データなし）
 // ================================================================
 describe('初回訪問（保存データなし）', () => {
@@ -1045,6 +1090,7 @@ describe('異常系', () => {
   });
 
   it('保存データが壊れていて読み込めない場合は、積まれていた変更を書き込んで保存を続ける', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
     await seedRaw('{壊れたデータ');
     const release = await holdObjectStore();
     const getSpy = vi.spyOn(IDBObjectStore.prototype, 'get');
@@ -1070,6 +1116,36 @@ describe('異常系', () => {
     await waitForIdb();
     expect(putSpy).toHaveBeenCalledTimes(2);
     expect((await readSaved()).state).toMatchObject({ modelType: 'alex', showLayer2: false });
+  });
+
+  it('保存データが壊れていて読み込めない場合、変更がなければ（起動時の set・タイマー・ページ非表示でも）上書きしない', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const broken = '{"state":{"layers":[{"id":"x"';
+    await seedRaw(broken);
+
+    const { useEditorStore } = await loadStore();
+    // 起動直後の（永続化対象外の）set。初期状態（空）が書き込み待ちになる
+    useEditorStore.getState().getComposite();
+    // 読み込み（失敗）が終わるまで待つ
+    await until(() => consoleError.mock.calls.length > 0);
+    expect(consoleError).toHaveBeenCalledWith(expect.stringContaining('読み込めません'), expect.anything());
+
+    // 読み込み後も、永続化対象外の set・タイマー・ページ非表示では書き込まない
+    useEditorStore.getState().setHighlightedLayer('x');
+    useEditorStore.getState().getComposite();
+    vi.advanceTimersByTime(MAX_WAIT_MS * 5);
+    setVisibility('hidden');
+    firePageHide();
+    await waitForIdb();
+    expect(putSpy).not.toHaveBeenCalled();
+    expect(await readRaw()).toBe(broken);
+
+    // 実際に変更したら保存される
+    useEditorStore.getState().setModelType('alex');
+    vi.advanceTimersByTime(DEBOUNCE_MS);
+    await waitForIdb();
+    expect(putSpy).toHaveBeenCalledTimes(1);
+    expect((await readSaved()).state.modelType).toBe('alex');
   });
 
   it('別のタブで DB が削除されると接続を閉じ、次の書き込みで開き直して保存する', async () => {
