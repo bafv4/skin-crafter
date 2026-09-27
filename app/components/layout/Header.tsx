@@ -21,7 +21,6 @@ import {
 import { CraftingTableIcon } from '@components/icons/CraftingTableIcon';
 import { useEditorStore } from '../../stores/editorStore';
 import { downloadSkin, loadSkinFromFile } from '@lib/skinRenderer';
-import { getPixelEngine } from '@lib/pixelEngine';
 import { useEffect, useRef } from 'react';
 import type { Layer, LayerGroup, PaletteColor, RGBA, LayerPixels, MaterialType } from '../../types/editor';
 import { createEmptyLayerPixels, SKIN_WIDTH, SKIN_HEIGHT } from '../../types/editor';
@@ -288,36 +287,11 @@ export function Header() {
         name: p[2],
       }));
 
-      // Sync layers to PixelEngine
-      const engine = getPixelEngine();
-      engine.clearAllLayers();
-      for (const layer of importedLayers) {
-        engine.createLayer(layer.id, layer.order);
-        // Convert LayerPixels to Uint8ClampedArray
-        const data = new Uint8ClampedArray(SKIN_WIDTH * SKIN_HEIGHT * 4);
-        for (let y = 0; y < SKIN_HEIGHT; y++) {
-          for (let x = 0; x < SKIN_WIDTH; x++) {
-            const pixel = layer.pixels[y]?.[x];
-            const i = (y * SKIN_WIDTH + x) * 4;
-            if (pixel) {
-              data[i] = pixel.r;
-              data[i + 1] = pixel.g;
-              data[i + 2] = pixel.b;
-              data[i + 3] = pixel.a;
-            }
-          }
-        }
-        engine.setLayerData(layer.id, layer.order, data);
-      }
-
-      // Restore state
-      useEditorStore.setState({
+      // プロジェクトを開く（PixelEngine の作り直しと、前のプロジェクトの履歴の破棄もここで行う）
+      store.loadProject({
         layers: importedLayers,
         layerGroups: importedGroups,
         palette: importedPalette,
-        activeLayerId: importedLayers.length > 0 ? importedLayers[0].id : null,
-        compositeCache: null,
-        previewVersion: store.previewVersion + 1,
       });
     } catch (error) {
       console.error('Failed to import JSON:', error);

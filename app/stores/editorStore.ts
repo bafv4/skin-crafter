@@ -181,6 +181,8 @@ interface EditorState {
 
   // File actions
   loadFromImageData: (imageData: ImageData) => void;
+  // プロジェクトを開く（JSON 読み込み）。前のプロジェクトの元に戻す履歴は破棄する
+  loadProject: (project: { layers: Layer[]; layerGroups: LayerGroup[]; palette: PaletteColor[] }) => void;
   generateLayers: (options?: { threshold?: ColorThresholdPreset; thresholdValue?: number; applyNoise?: boolean }) => void;
   mergeLayersById: (sourceLayerId: string, targetLayerId: string) => void;
   mergeSimilarLayersAction: (options?: { threshold?: ColorThresholdPreset; thresholdValue?: number; applyNoise?: boolean }) => void;
@@ -1560,6 +1562,29 @@ export const useEditorStore = create<EditorState>()(
     }));
     // 変更後の状態との差分を 1 件の履歴として記録する（set より前だと差分が空になる）
     saveToHistory();
+  },
+
+  loadProject: ({ layers, layerGroups, palette }) => {
+    const engine = getPixelEngine();
+    engine.clearAllLayers();
+    for (const layer of layers) {
+      engine.createLayer(layer.id, layer.order);
+      engine.setLayerData(layer.id, layer.order, layerPixelsToUint8(layer.pixels));
+    }
+
+    // 前のプロジェクトの元に戻す情報（履歴・描きかけのスナップショット）は持ち越さない
+    clearSnapshot();
+    set((state) => ({
+      layers,
+      layerGroups,
+      palette,
+      activeLayerId: layers.length > 0 ? layers[0].id : null,
+      layerColorPickTarget: null,
+      history: [],
+      historyIndex: -1,
+      compositeCache: null,
+      previewVersion: state.previewVersion + 1,
+    }));
   },
 
   generateLayers: (options = {}) => {

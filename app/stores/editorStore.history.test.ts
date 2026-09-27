@@ -1437,3 +1437,59 @@ describe('更新の undo / redo と、履歴に記録されない変更', () => 
     expect(s().layerGroups[0]).toMatchObject({ name: '現在の名前', collapsed: true, visible: false });
   });
 });
+
+// ================================================================
+// プロジェクトを開く（JSON 読み込み）と履歴
+// ================================================================
+describe('loadProject（プロジェクトを開く）', () => {
+  it('前のプロジェクトの履歴を消し、元に戻しても前のプロジェクトのレイヤーやグループが入り込まない', () => {
+    // 前のプロジェクト: グループ付きのレイヤーを作り、構造を変える操作を履歴に残す
+    const group = s().createLayerGroup('前のグループ');
+    const a = createDirectLayer('前のA');
+    stroke([[1, 1]], RED);
+    s().moveLayerToGroup(a, group);
+    s().duplicateLayer(a);
+    expect(s().history.length).toBeGreaterThan(0);
+
+    const imported = makeLayer({ id: 'imported', name: '読み込んだレイヤー' });
+    imported.pixels[5][5] = { ...BLUE };
+    s().loadProject({ layers: [imported], layerGroups: [], palette: [] });
+
+    expect(s().history).toEqual([]);
+    expect(s().historyIndex).toBe(-1);
+    s().undo();
+    expect(s().layers.map((l) => l.id)).toEqual(['imported']);
+    expect(s().layerGroups).toEqual([]);
+  });
+
+  it('読み込んだレイヤーを選択状態にし、PixelEngine も作り直す', () => {
+    createDirectLayer('前');
+    const imported = makeLayer({ id: 'imported', order: 3 });
+    imported.pixels[0][0] = { ...GREEN };
+    vi.clearAllMocks();
+
+    s().loadProject({ layers: [imported], layerGroups: [makeGroup({ id: 'g' })], palette: [] });
+
+    expect(s().activeLayerId).toBe('imported');
+    expect(engine.clearAllLayers).toHaveBeenCalledTimes(1);
+    expect(engine.createLayer).toHaveBeenCalledWith('imported', 3);
+    expect(engine.setLayerData).toHaveBeenCalledWith('imported', 3, expect.any(Uint8ClampedArray));
+    expect(s().getComposite()[0][0]).toEqual(GREEN);
+  });
+
+  it('描きかけのストロークの元に戻す情報も持ち越さない', () => {
+    createDirectLayer('前');
+    s().setPixel(2, 2, RED); // commitDrawing していない（スナップショットが残っている）
+
+    const imported = makeLayer({ id: 'imported' });
+    s().loadProject({ layers: [imported], layerGroups: [], palette: [] });
+    s().setActiveLayer('imported');
+    stroke([[3, 3]], BLUE);
+
+    // 記録されるのは読み込み後のストロークだけ
+    expect(s().history).toHaveLength(1);
+    s().undo();
+    expect(s().layers.map((l) => l.id)).toEqual(['imported']);
+    expect(px('imported', 3, 3)).toBeNull();
+  });
+});
