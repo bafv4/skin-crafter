@@ -103,7 +103,8 @@ export function Toolbar() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [setActiveTool, undo, redo]);
 
-  const canUndo = historyIndex > 0;
+  // historyIndex は最新の履歴エントリの位置（-1 = 履歴なし）。0 のときも 1 件戻せる
+  const canUndo = historyIndex >= 0;
   const canRedo = historyIndex < history.length - 1;
 
   return (

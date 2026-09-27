@@ -853,9 +853,15 @@ export const useEditorStore = create<EditorState>()(
   },
 
   updateLayerColor: (layerId, color) => {
-    const { layers } = get();
+    const { layers, layerGroups } = get();
     const layerIndex = layers.findIndex(l => l.id === layerId);
     if (layerIndex === -1) return;
+
+    // 一連の色変更（ドラッグ中など）の最初だけスナップショットを取り、
+    // 操作完了時に呼び出し側が saveToHistory() で 1 件の履歴として確定する
+    if (!snapshotLayers) {
+      takeSnapshot(layers, layerGroups);
+    }
 
     const layer = layers[layerIndex];
     const newLayerPixels = cloneLayerPixels(layer.pixels);

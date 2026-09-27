@@ -483,6 +483,7 @@ function LayerDetailDialog({
   const resetNoise = useEditorStore((state) => state.resetNoise);
   const updateLayerType = useEditorStore((state) => state.updateLayerType);
   const updateLayerColor = useEditorStore((state) => state.updateLayerColor);
+  const saveToHistory = useEditorStore((state) => state.saveToHistory);
   const updateLayerName = useEditorStore((state) => state.updateLayerName);
   const updateLayerOpacity = useEditorStore((state) => state.updateLayerOpacity);
   const startLayerColorPick = useEditorStore((state) => state.startLayerColorPick);
@@ -614,6 +615,7 @@ function LayerDetailDialog({
                 <ColorPicker
                   color={layer.baseColor}
                   onChange={(color) => updateLayerColor(layerId, color)}
+                  onChangeComplete={saveToHistory}
                 />
               </div>
             </div>
@@ -821,6 +823,7 @@ const LayerItem = memo(function LayerItem({
   const setActiveLayer = useEditorStore((state) => state.setActiveLayer);
   const setHighlightedLayer = useEditorStore((state) => state.setHighlightedLayer);
   const updateLayerColor = useEditorStore((state) => state.updateLayerColor);
+  const saveToHistory = useEditorStore((state) => state.saveToHistory);
   const toggleLayerVisibility = useEditorStore((state) => state.toggleLayerVisibility);
   const duplicateLayer = useEditorStore((state) => state.duplicateLayer);
   const updateLayerName = useEditorStore((state) => state.updateLayerName);
@@ -916,6 +919,7 @@ const LayerItem = memo(function LayerItem({
                 <ColorPicker
                   color={layer.baseColor}
                   onChange={(color) => updateLayerColor(layerId, color)}
+                  onChangeComplete={saveToHistory}
                 />
               </PopoverContent>
             </Popover>

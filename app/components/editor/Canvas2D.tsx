@@ -277,6 +277,7 @@ export function Canvas2D() {
         const pixel = useEditorStore.getState().getComposite()[pos.y][pos.x];
         if (pixel.a > 0) {
           useEditorStore.getState().updateLayerColor(pickTarget, { ...pixel });
+          useEditorStore.getState().saveToHistory();
           // 取得したらレイヤー設定ダイアログに戻る
           endLayerColorPick();
         }

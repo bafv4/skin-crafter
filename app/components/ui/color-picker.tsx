@@ -85,11 +85,13 @@ function SaturationValuePicker({
   saturation,
   value,
   onChange,
+  onChangeEnd,
 }: {
   hue: number;
   saturation: number;
   value: number;
   onChange: (s: number, v: number) => void;
+  onChangeEnd?: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
@@ -118,8 +120,10 @@ function SaturationValuePicker({
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
+    const wasDragging = isDragging.current;
     isDragging.current = false;
     containerRef.current?.releasePointerCapture(e.pointerId);
+    if (wasDragging) onChangeEnd?.();
   };
 
   const hueColor = `hsl(${hue}, 100%, 50%)`;
@@ -137,6 +141,7 @@ function SaturationValuePicker({
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
     >
       <div
         className="pointer-events-none absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow-[0_0_0_1px_rgba(0,0,0,0.3)]"
@@ -153,9 +158,11 @@ function SaturationValuePicker({
 function HueSlider({
   hue,
   onChange,
+  onChangeEnd,
 }: {
   hue: number;
   onChange: (h: number) => void;
+  onChangeEnd?: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
@@ -183,8 +190,10 @@ function HueSlider({
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
+    const wasDragging = isDragging.current;
     isDragging.current = false;
     containerRef.current?.releasePointerCapture(e.pointerId);
+    if (wasDragging) onChangeEnd?.();
   };
 
   return (
@@ -197,6 +206,7 @@ function HueSlider({
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
     >
       <div
         className="pointer-events-none absolute top-1/2 h-5 w-2 -translate-x-1/2 -translate-y-1/2 rounded-sm border border-white shadow-[0_0_0_1px_rgba(0,0,0,0.3)]"
@@ -214,10 +224,12 @@ function AlphaSlider({
   alpha,
   color,
   onChange,
+  onChangeEnd,
 }: {
   alpha: number;
   color: { r: number; g: number; b: number };
   onChange: (a: number) => void;
+  onChangeEnd?: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
@@ -245,8 +257,10 @@ function AlphaSlider({
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
+    const wasDragging = isDragging.current;
     isDragging.current = false;
     containerRef.current?.releasePointerCapture(e.pointerId);
+    if (wasDragging) onChangeEnd?.();
   };
 
   const rgbStr = `${color.r}, ${color.g}, ${color.b}`;
@@ -264,6 +278,7 @@ function AlphaSlider({
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
     >
       <div
         className="pointer-events-none absolute top-1/2 h-5 w-2 -translate-x-1/2 -translate-y-1/2 rounded-sm border border-white shadow-[0_0_0_1px_rgba(0,0,0,0.3)]"
@@ -456,11 +471,14 @@ function ColorPalette({
 export function ColorPicker({
   color,
   onChange,
+  onChangeComplete,
   showAlpha = false,
   showPalette = true,
 }: {
   color: RGBA;
   onChange: (color: RGBA) => void;
+  // 1回の操作（ドラッグ終了・HEX確定・パレット選択）が完了したときに呼ばれる（履歴の確定用）
+  onChangeComplete?: () => void;
   showAlpha?: boolean;
   showPalette?: boolean;
 }) {
@@ -521,6 +539,7 @@ export function ColorPicker({
       setHsv(rgbToHsv(newColor.r, newColor.g, newColor.b));
       isInternalChange.current = true;
       onChange(newColor);
+      onChangeComplete?.();
     }
   };
 
@@ -530,8 +549,9 @@ export function ColorPicker({
       setHexInput(rgbaToHex(paletteColor));
       isInternalChange.current = true;
       onChange({ ...paletteColor });
+      onChangeComplete?.();
     },
-    [onChange]
+    [onChange, onChangeComplete]
   );
 
   const currentRgb = hsvToRgb(hsv.h, hsv.s, hsv.v);
@@ -573,12 +593,13 @@ export function ColorPicker({
         saturation={hsv.s}
         value={hsv.v}
         onChange={handleSaturationValueChange}
+        onChangeEnd={onChangeComplete}
       />
 
       {/* Hue slider */}
       <div className="flex flex-col gap-1">
         <Label className="text-xs text-muted-foreground">Hue</Label>
-        <HueSlider hue={hsv.h} onChange={handleHueChange} />
+        <HueSlider hue={hsv.h} onChange={handleHueChange} onChangeEnd={onChangeComplete} />
       </div>
 
       {/* Alpha slider */}
@@ -587,7 +608,7 @@ export function ColorPicker({
           <Label className="text-xs text-muted-foreground">
             Alpha ({Math.round((color.a / 255) * 100)}%)
           </Label>
-          <AlphaSlider alpha={color.a} color={currentRgb} onChange={handleAlphaChange} />
+          <AlphaSlider alpha={color.a} color={currentRgb} onChange={handleAlphaChange} onChangeEnd={onChangeComplete} />
         </div>
       )}
 
