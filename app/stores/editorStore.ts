@@ -181,7 +181,7 @@ interface EditorState {
   reset: () => void;
 
   // Palette actions
-  addToPalette: (color: RGBA, name?: string) => void;
+  addToPalette: (color: RGBA, name?: string) => string;
   removeFromPalette: (id: string) => void;
   updatePaletteColor: (id: string, color: RGBA) => void;
   renamePaletteColor: (id: string, name: string) => void;
@@ -1563,6 +1563,7 @@ export const useEditorStore = create<EditorState>()(
     set((state) => ({
       palette: [...state.palette, { id, color: { ...color }, name }],
     }));
+    return id;
   },
 
   removeFromPalette: (id) => {
@@ -1582,7 +1583,8 @@ export const useEditorStore = create<EditorState>()(
   renamePaletteColor: (id, name) => {
     set((state) => ({
       palette: state.palette.map((p) =>
-        p.id === id ? { ...p, name } : p
+        // 空文字は名前なしとして扱う
+        p.id === id ? { ...p, name: name.trim() || undefined } : p
       ),
     }));
   },

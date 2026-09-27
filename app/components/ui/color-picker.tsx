@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Plus, X } from 'lucide-react';
+import { Plus, X, Pencil } from 'lucide-react';
 import { Input } from './input';
 import { Label } from './label';
 import { Button } from './button';
@@ -284,11 +284,31 @@ function ColorPalette({
   onSelectColor: (color: RGBA) => void;
   currentColor: RGBA;
 }) {
-  const { palette, addToPalette, removeFromPalette } = useEditorStore();
+  const { palette, addToPalette, removeFromPalette, renamePaletteColor } = useEditorStore();
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  // 名前を編集中のパレット色
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [nameInput, setNameInput] = useState('');
+
+  const editingColor = palette.find((p) => p.id === editingId) ?? null;
+
+  const startEditing = (p: PaletteColor) => {
+    setEditingId(p.id);
+    setNameInput(p.name ?? '');
+  };
+
+  const commitName = () => {
+    if (editingId) {
+      renamePaletteColor(editingId, nameInput);
+    }
+    setEditingId(null);
+  };
 
   const handleAddCurrentColor = () => {
-    addToPalette(currentColor);
+    const id = addToPalette(currentColor);
+    // 追加直後に名前を入力できるようにする（空のままでも可）
+    setEditingId(id);
+    setNameInput('');
   };
 
   const isSameColor = (c1: RGBA, c2: RGBA) =>
@@ -333,31 +353,86 @@ function ColorPalette({
                   <TooltipTrigger asChild>
                     <button
                       className={`h-6 w-6 rounded border transition-all ${
-                        isSameColor(p.color, currentColor)
-                          ? 'border-primary ring-1 ring-primary'
-                          : 'border-border hover:border-foreground/50'
+                        editingId === p.id
+                          ? 'border-primary ring-2 ring-primary'
+                          : isSameColor(p.color, currentColor)
+                            ? 'border-primary ring-1 ring-primary'
+                            : 'border-border hover:border-foreground/50'
                       }`}
                       style={{ backgroundColor: rgbaToHex(p.color) }}
+                      aria-label={p.name ? `${p.name}（${rgbaToHex(p.color)}）` : rgbaToHex(p.color)}
                       onClick={() => onSelectColor(p.color)}
+                      onDoubleClick={() => startEditing(p)}
                     />
                   </TooltipTrigger>
                   <TooltipContent>
-                    <p>{p.name || rgbaToHex(p.color)}</p>
+                    {p.name ? (
+                      <p>
+                        {p.name} <span className="opacity-70">{rgbaToHex(p.color)}</span>
+                      </p>
+                    ) : (
+                      <p>{rgbaToHex(p.color)}</p>
+                    )}
                   </TooltipContent>
                 </Tooltip>
                 {hoveredId === p.id && (
-                  <button
-                    className="absolute -top-1 -right-1 h-3.5 w-3.5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      removeFromPalette(p.id);
-                    }}
-                  >
-                    <X className="h-2 w-2" />
-                  </button>
+                  <>
+                    <button
+                      className="absolute -top-1 -right-1 h-3.5 w-3.5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center"
+                      aria-label="パレットから削除"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (editingId === p.id) setEditingId(null);
+                        removeFromPalette(p.id);
+                      }}
+                    >
+                      <X className="h-2 w-2" />
+                    </button>
+                    <button
+                      className="absolute -bottom-1 -right-1 h-3.5 w-3.5 rounded-full bg-secondary text-secondary-foreground border border-border flex items-center justify-center"
+                      aria-label="名前を編集"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        startEditing(p);
+                      }}
+                    >
+                      <Pencil className="h-2 w-2" />
+                    </button>
+                  </>
                 )}
               </div>
             ))}
+          </div>
+        )}
+
+        {/* 色の名前編集 */}
+        {editingColor && (
+          <div className="flex items-center gap-1.5">
+            <div
+              className="h-6 w-6 shrink-0 rounded border border-border"
+              style={{ backgroundColor: rgbaToHex(editingColor.color) }}
+            />
+            <Input
+              autoFocus
+              value={nameInput}
+              onChange={(e) => setNameInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  commitName();
+                } else if (e.key === 'Escape') {
+                  // ポップオーバーごと閉じないようにする
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setEditingId(null);
+                }
+              }}
+              onBlur={commitName}
+              placeholder={`名前（${rgbaToHex(editingColor.color)}）`}
+              aria-label="色の名前"
+              maxLength={32}
+              className="h-7 text-xs"
+            />
           </div>
         )}
       </div>
