@@ -10,6 +10,7 @@ import {
   splitLayerByColor,
   splitLayerBySelection,
 } from './layerGenerator';
+import { computeLayerComposite } from './layerComposite';
 import {
   type Layer,
   type LayerPixels,
@@ -1237,7 +1238,7 @@ describe('splitLayerBySelection', () => {
     expect(src.pixels[1][2]).toBeNull();
   });
 
-  it('新レイヤーは元レイヤーの設定を引き継ぎ、最大 order + 1 の位置に追加される', () => {
+  it('新レイヤーは元レイヤーの設定を引き継ぎ、元レイヤーと同じ重なり位置（元レイヤーの手前）に追加される', () => {
     const { layers } = setup();
 
     const result = splitLayerBySelection(layers, 'src', [{ x: 1, y: 1 }]);
@@ -1250,9 +1251,11 @@ describe('splitLayerBySelection', () => {
       opacity: 70,
       visible: true,
       noiseSettings: { brightness: 12, hue: 4 },
-      order: 6,
+      order: 3,
     });
-    expect(new Set(result.layers.map((l) => l.order)).size).toBe(result.layers.length);
+    // 元レイヤーは 1 つ後ろへ。別グループのレイヤーは動かない
+    expect(result.layers.find((l) => l.id === 'src')!.order).toBe(4);
+    expect(result.layers.find((l) => l.id === 'other')!.order).toBe(5);
   });
 
   it('新レイヤーの基本色は選択ピクセルの平均色（アルファ 255）', () => {
@@ -1488,5 +1491,81 @@ describe('blendBorderPixels', () => {
       ]),
     });
     expect(blendBorderPixels([layer], 100).layers).toEqual([layer]);
+  });
+});
+
+// ---- 分割しても見た目（合成結果）が変わらないこと ----
+
+describe('分割の前後で合成結果・グループ・表示状態が保たれる', () => {
+  // 同じグループの 手前 / 対象 / 奥 と、グループ外のレイヤー（グループ内より奥に描かれる）
+  // (8,10)〜(15,10) で重なるように塗る
+  function stack(targetOverrides: Partial<Layer> = {}) {
+    const row = (color: RGBA, from = 8, to = 16): Array<[number, number, RGBA]> =>
+      Array.from({ length: to - from }, (_, i) => [from + i, 10, color] as [number, number, RGBA]);
+    const front = makeLayer({ id: 'front', order: 0, groupId: 'g', pixels: pixelsWith([[8, 10, GREEN]]) });
+    const target = makeLayer({
+      id: 'target',
+      order: 1,
+      groupId: 'g',
+      opacity: 80,
+      pixels: pixelsWith([...row(RED, 8, 12), ...row(BLUE, 12, 16)]),
+      ...targetOverrides,
+    });
+    const back = makeLayer({ id: 'back', order: 2, groupId: 'g', pixels: pixelsWith(row(rgba(10, 10, 10))) });
+    const ungrouped = makeLayer({ id: 'ungrouped', order: 1, pixels: pixelsWith(row(rgba(250, 250, 250))) });
+    const groups = [{ id: 'g', name: 'G', collapsed: false, order: 0, visible: true }];
+    return { layers: [front, target, back, ungrouped], groups };
+  }
+
+  it('色で分割しても合成結果は変わらず、分割後のレイヤーは元のグループ・重なり位置に入る', () => {
+    const { layers, groups } = stack();
+    const before = computeLayerComposite(layers, groups);
+
+    const result = splitLayerByColor(layers, 'target', 30, false);
+
+    expect(computeLayerComposite(result.layers, groups)).toEqual(before);
+    const pieces = result.layers.filter((l) => !['front', 'back', 'ungrouped'].includes(l.id));
+    expect(pieces).toHaveLength(2);
+    for (const piece of pieces) {
+      expect(piece.groupId).toBe('g');
+      expect(piece.opacity).toBe(80);
+      expect(piece.visible).toBe(true);
+    }
+    // 分割後のレイヤーは元の位置（order 1〜2）、奥のレイヤーはその後ろへ、手前とグループ外は動かない
+    expect(pieces.map((l) => l.order).sort()).toEqual([1, 2]);
+    expect(result.layers.find((l) => l.id === 'front')!.order).toBe(0);
+    expect(result.layers.find((l) => l.id === 'back')!.order).toBe(3);
+    expect(result.layers.find((l) => l.id === 'ungrouped')!.order).toBe(1);
+    // 同じグループ内で order が重複しない
+    const inGroup = result.layers.filter((l) => l.groupId === 'g').map((l) => l.order);
+    expect(new Set(inGroup).size).toBe(inGroup.length);
+  });
+
+  it('非表示のレイヤーを色で分割すると、分割後のレイヤーも非表示のまま', () => {
+    const { layers, groups } = stack({ visible: false });
+    const before = computeLayerComposite(layers, groups);
+
+    const result = splitLayerByColor(layers, 'target', 30, false);
+
+    const pieces = result.layers.filter((l) => !['front', 'back', 'ungrouped'].includes(l.id));
+    expect(pieces).toHaveLength(2);
+    expect(pieces.every((l) => l.visible === false)).toBe(true);
+    expect(computeLayerComposite(result.layers, groups)).toEqual(before);
+  });
+
+  it('選択範囲で分割しても合成結果は変わらない（非表示のレイヤーからの分割も非表示のまま）', () => {
+    for (const visible of [true, false]) {
+      const { layers, groups } = stack({ visible });
+      const before = computeLayerComposite(layers, groups);
+
+      const result = splitLayerBySelection(layers, 'target', [{ x: 8, y: 10 }, { x: 12, y: 10 }]);
+
+      expect(result.newLayerId).not.toBeNull();
+      expect(computeLayerComposite(result.layers, groups)).toEqual(before);
+      const created = result.layers.find((l) => l.id === result.newLayerId)!;
+      expect(created.visible).toBe(visible);
+      const inGroup = result.layers.filter((l) => l.groupId === 'g').map((l) => l.order);
+      expect(new Set(inGroup).size).toBe(inGroup.length);
+    }
   });
 });

@@ -1682,6 +1682,13 @@ export const useEditorStore = create<EditorState>()(
         engine.createLayer(newLayerId, newLayer.order);
         engine.setLayerData(newLayerId, newLayer.order, layerPixelsToUint8(newLayer.pixels));
       }
+      // 新しいレイヤーを差し込んだ分、後ろへずれたレイヤーの重なり順を反映する
+      const previousOrders = new Map(layers.map((l) => [l.id, l.order]));
+      for (const l of newLayers) {
+        if (l.id !== layerId && l.id !== newLayerId && previousOrders.get(l.id) !== l.order) {
+          engine.setLayerOrder(l.id, l.order);
+        }
+      }
 
       set((state) => ({
         layers: newLayers,

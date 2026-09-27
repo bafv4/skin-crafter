@@ -804,10 +804,16 @@ export function splitLayerByColor(
     ? calculateNoiseFromThreshold(colorThreshold)
     : { brightness: 0, hue: 0 };
 
-  // Create new layers for each component
+  // 分割後のレイヤーは元のレイヤーと同じ重なり位置に並べる（見た目を変えないため）。
+  // 同じグループで元のレイヤーより奥のレイヤーを、増える枚数分だけ後ろへずらす
+  const shift = components.size - 1;
   const newLayers: Layer[] = layers
     .filter(l => l.id !== layerId)
-    .map(l => ({ ...l, pixels: cloneLayerPixels(l.pixels) }));
+    .map(l => ({
+      ...l,
+      order: l.groupId === layer.groupId && l.order > layer.order ? l.order + shift : l.order,
+      pixels: cloneLayerPixels(l.pixels),
+    }));
 
   let subIndex = 1;
   for (const [, componentPixels] of components) {
@@ -836,10 +842,10 @@ export function splitLayerByColor(
       name: `${layer.name}-${subIndex}`,
       baseColor: avgColor,
       noiseSettings: { ...noiseSettings },
-      groupId: null,
-      order: newLayers.length,
+      groupId: layer.groupId,
+      order: layer.order + subIndex - 1,
       layerType: layer.layerType,
-      visible: true,
+      visible: layer.visible,
       opacity: layer.opacity ?? 100,
       pixels: componentPixelData,
     };
@@ -903,17 +909,18 @@ export function splitLayerBySelection(
     newLayerPixels[p.y][p.x] = { ...layer.pixels[p.y][p.x]! };
   }
 
+  // 新しいレイヤーは元のレイヤーのすぐ手前（同じ重なり位置）に置き、見た目を変えない。
+  // 同じグループで元のレイヤー以降（元のレイヤーを含む）を 1 つ後ろへずらす
   const newLayerId = generateId();
-  const maxOrder = layers.length > 0 ? Math.max(...layers.map(l => l.order)) : -1;
   const newLayer: Layer = {
     id: newLayerId,
     name: `${layer.name}-split`,
     baseColor: avgColor,
     noiseSettings: { ...layer.noiseSettings },
     groupId: layer.groupId,
-    order: maxOrder + 1,
+    order: layer.order,
     layerType: layer.layerType,
-    visible: true,
+    visible: layer.visible,
     opacity: layer.opacity ?? 100,
     pixels: newLayerPixels,
   };
@@ -921,15 +928,16 @@ export function splitLayerBySelection(
   // Create new layers array, removing selected pixels from source layer
   const newLayers: Layer[] = [];
   for (const l of layers) {
+    const order = l.groupId === layer.groupId && l.order >= layer.order ? l.order + 1 : l.order;
     if (l.id === layerId) {
       // Clone source layer and remove selected pixels
       const clonedPixels = cloneLayerPixels(l.pixels);
       for (const p of validPixels) {
         clonedPixels[p.y][p.x] = null;
       }
-      newLayers.push({ ...l, pixels: clonedPixels });
+      newLayers.push({ ...l, order, pixels: clonedPixels });
     } else {
-      newLayers.push({ ...l, pixels: cloneLayerPixels(l.pixels) });
+      newLayers.push({ ...l, order, pixels: cloneLayerPixels(l.pixels) });
     }
   }
   newLayers.push(newLayer);
