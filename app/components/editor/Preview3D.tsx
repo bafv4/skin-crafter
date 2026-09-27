@@ -8,14 +8,20 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@components/ui/tooltip';
-import { Eye, EyeOff, RotateCcw, Pause, ZoomIn, ZoomOut, RotateCw } from 'lucide-react';
-import { Preview3DCanvas } from './Preview3D.client';
+import { Popover, PopoverContent, PopoverTrigger } from '@components/ui/popover';
+import { Eye, EyeOff, RotateCcw, Pause, ZoomIn, ZoomOut, RotateCw, PersonStanding } from 'lucide-react';
+import { Preview3DCanvas, DEFAULT_PART_VISIBILITY, BODY_PART_KEYS, type PartVisibility } from './Preview3D.client';
+import { PartVisibilityPicker } from './PartVisibilityPicker';
 
 export function Preview3D() {
   const { showLayer2, toggleLayer2 } = useEditorStore();
   const [autoRotate, setAutoRotate] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [resetKey, setResetKey] = useState(0);
+  const [partVisibility, setPartVisibility] = useState<PartVisibility>(DEFAULT_PART_VISIBILITY);
+  const hasHiddenParts = BODY_PART_KEYS.some(
+    (key) => !partVisibility[key].inner || !partVisibility[key].outer
+  );
 
   const handleZoomIn = () => setZoom((z) => Math.min(z + 0.2, 2));
   const handleZoomOut = () => setZoom((z) => Math.max(z - 0.2, 0.5));
@@ -26,10 +32,10 @@ export function Preview3D() {
 
   return (
     <div className="flex h-full flex-col bg-muted/30">
-      <div className="flex items-center justify-between border-b border-border bg-card px-4 py-2">
-        <span className="text-sm font-medium">3Dプレビュー</span>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-card px-4 py-2">
+        <span className="shrink-0 whitespace-nowrap text-sm font-medium">3Dプレビュー</span>
         <TooltipProvider>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <ButtonGroup>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -89,6 +95,24 @@ export function Preview3D() {
                 <p>自動回転の切り替え</p>
               </TooltipContent>
             </Tooltip>
+            <Popover>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <PopoverTrigger asChild>
+                    <Button variant={hasHiddenParts ? 'default' : 'outline'} size="sm">
+                      <PersonStanding className="mr-1 h-3 w-3" />
+                      パーツ
+                    </Button>
+                  </PopoverTrigger>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>パーツごとの表示を切り替え</p>
+                </TooltipContent>
+              </Tooltip>
+              <PopoverContent align="end" className="w-80">
+                <PartVisibilityPicker visibility={partVisibility} onChange={setPartVisibility} />
+              </PopoverContent>
+            </Popover>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -113,6 +137,7 @@ export function Preview3D() {
           zoom={zoom}
           onZoomChange={setZoom}
           resetKey={resetKey}
+          partVisibility={partVisibility}
         />
       </div>
     </div>

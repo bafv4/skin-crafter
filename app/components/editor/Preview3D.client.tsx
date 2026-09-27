@@ -5,6 +5,24 @@ import * as THREE from 'three';
 import { useEditorStore } from '../../stores/editorStore';
 import { SKIN_WIDTH, SKIN_HEIGHT, type ModelType, type RGBA } from '../../types/editor';
 
+// Body parts that can be toggled individually in the 3D preview
+export type BodyPartKey = 'head' | 'body' | 'rightArm' | 'leftArm' | 'rightLeg' | 'leftLeg';
+
+// Visibility of inner (layer 1) and outer (layer 2) meshes per body part
+export type PartVisibility = Record<BodyPartKey, { inner: boolean; outer: boolean }>;
+
+export const BODY_PART_KEYS: BodyPartKey[] = ['head', 'body', 'rightArm', 'leftArm', 'rightLeg', 'leftLeg'];
+
+export function createPartVisibility(visible: boolean): PartVisibility {
+  const result = {} as PartVisibility;
+  for (const key of BODY_PART_KEYS) {
+    result[key] = { inner: visible, outer: visible };
+  }
+  return result;
+}
+
+export const DEFAULT_PART_VISIBILITY: PartVisibility = createPartVisibility(true);
+
 // Helper to build texture data from composite
 function buildTextureData(composite: RGBA[][]): Uint8Array {
   const data = new Uint8Array(SKIN_WIDTH * SKIN_HEIGHT * 4);
@@ -164,6 +182,7 @@ function BodyPart({
   uvMap,
   texture,
   layer2UvMap,
+  showInner = true,
   showLayer2,
 }: {
   position: [number, number, number];
@@ -178,6 +197,7 @@ function BodyPart({
   };
   texture: THREE.Texture;
   layer2UvMap?: typeof uvMap;
+  showInner?: boolean;
   showLayer2?: boolean;
 }) {
   const geometry = useMemo(
@@ -206,14 +226,16 @@ function BodyPart({
 
   return (
     <group position={position}>
-      <mesh geometry={geometry}>
-        <meshBasicMaterial
-          map={texture}
-          transparent
-          alphaTest={0.1}
-          side={THREE.DoubleSide}
-        />
-      </mesh>
+      {showInner && (
+        <mesh geometry={geometry}>
+          <meshBasicMaterial
+            map={texture}
+            transparent
+            alphaTest={0.1}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+      )}
       {showLayer2 && layer2Geometry && (
         <mesh geometry={layer2Geometry}>
           <meshBasicMaterial
@@ -229,10 +251,24 @@ function BodyPart({
 }
 
 // Minecraft character model
-function MinecraftCharacter({ modelType, autoRotate }: { modelType: ModelType; autoRotate: boolean }) {
+function MinecraftCharacter({ modelType, autoRotate, partVisibility }: {
+  modelType: ModelType;
+  autoRotate: boolean;
+  partVisibility: PartVisibility;
+}) {
   const texture = useSkinTexture();
   const showLayer2 = useEditorStore((state) => state.showLayer2);
   const groupRef = useRef<THREE.Group>(null);
+
+  // Re-render on demand when part visibility changes
+  useEffect(() => {
+    invalidate();
+  }, [partVisibility, showLayer2]);
+
+  const partProps = (key: BodyPartKey) => ({
+    showInner: partVisibility[key].inner,
+    showLayer2: showLayer2 && partVisibility[key].outer,
+  });
 
   // Rotate slowly when autoRotate is enabled
   // When not rotating, useFrame still runs but does nothing (frameloop=demand handles this)
@@ -306,7 +342,7 @@ function MinecraftCharacter({ modelType, autoRotate }: { modelType: ModelType; a
           left: [48, 8, 8, 8],
         }}
         texture={texture}
-        showLayer2={showLayer2}
+        {...partProps('head')}
       />
 
       {/* Body */}
@@ -330,7 +366,7 @@ function MinecraftCharacter({ modelType, autoRotate }: { modelType: ModelType; a
           left: [28, 36, 4, 12],
         }}
         texture={texture}
-        showLayer2={showLayer2}
+        {...partProps('body')}
       />
 
       {/* Right Arm */}
@@ -340,7 +376,7 @@ function MinecraftCharacter({ modelType, autoRotate }: { modelType: ModelType; a
         uvMap={rightArmUvMap}
         layer2UvMap={rightArmLayer2UvMap}
         texture={texture}
-        showLayer2={showLayer2}
+        {...partProps('rightArm')}
       />
 
       {/* Left Arm */}
@@ -350,7 +386,7 @@ function MinecraftCharacter({ modelType, autoRotate }: { modelType: ModelType; a
         uvMap={leftArmUvMap}
         layer2UvMap={leftArmLayer2UvMap}
         texture={texture}
-        showLayer2={showLayer2}
+        {...partProps('leftArm')}
       />
 
       {/* Right Leg */}
@@ -374,7 +410,7 @@ function MinecraftCharacter({ modelType, autoRotate }: { modelType: ModelType; a
           left: [8, 36, 4, 12],
         }}
         texture={texture}
-        showLayer2={showLayer2}
+        {...partProps('rightLeg')}
       />
 
       {/* Left Leg */}
@@ -398,15 +434,16 @@ function MinecraftCharacter({ modelType, autoRotate }: { modelType: ModelType; a
           left: [8, 52, 4, 12],
         }}
         texture={texture}
-        showLayer2={showLayer2}
+        {...partProps('leftLeg')}
       />
     </group>
   );
 }
 
 // Scene setup
-function Scene({ autoRotate, zoom, onZoomChange, resetKey }: {
+function Scene({ autoRotate, zoom, onZoomChange, resetKey, partVisibility }: {
   autoRotate: boolean;
+  partVisibility: PartVisibility;
   zoom: number;
   onZoomChange?: (zoom: number) => void;
   resetKey: number;
@@ -467,7 +504,7 @@ function Scene({ autoRotate, zoom, onZoomChange, resetKey }: {
 
   return (
     <>
-      <MinecraftCharacter modelType={modelType} autoRotate={autoRotate} />
+      <MinecraftCharacter modelType={modelType} autoRotate={autoRotate} partVisibility={partVisibility} />
       <OrbitControls
         ref={controlsRef}
         enablePan={true}
@@ -508,12 +545,14 @@ export function Preview3DCanvas({
   autoRotate = true,
   zoom = 1,
   onZoomChange,
-  resetKey = 0
+  resetKey = 0,
+  partVisibility = DEFAULT_PART_VISIBILITY,
 }: {
   autoRotate?: boolean;
   zoom?: number;
   onZoomChange?: (zoom: number) => void;
   resetKey?: number;
+  partVisibility?: PartVisibility;
 }) {
   return (
     <Canvas
@@ -521,7 +560,7 @@ export function Preview3DCanvas({
       frameloop="demand"
     >
       <RenderController autoRotate={autoRotate} />
-      <Scene autoRotate={autoRotate} zoom={zoom} onZoomChange={onZoomChange} resetKey={resetKey} />
+      <Scene autoRotate={autoRotate} zoom={zoom} onZoomChange={onZoomChange} resetKey={resetKey} partVisibility={partVisibility} />
     </Canvas>
   );
 }
